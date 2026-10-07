@@ -75,6 +75,9 @@ describe("cancelOptions: standard_retreat", () => {
   it("at 29 days only transfer", () => {
     expect(kinds(retreat({ startsAt: startIn(29 * DAY) }))).toEqual(["transfer"]);
   });
+  it("at 1h before start still offers transfer", () => {
+    expect(kinds(retreat({ startsAt: startIn(HOUR) }))).toEqual(["transfer"]);
+  });
   it("after start offers nothing", () => {
     expect(kinds(retreat({ startsAt: startIn(-MIN) }))).toEqual([]);
   });

@@ -32,6 +32,6 @@ export function cancelOptions(i: PolicyInput): CancelOption[] {
     const ratio = paid > 0 ? Math.max(0, paid - 0.5 * i.totalPriceBaseMinor) / paid : 0;
     if (ratio > 0) out.push({ kind: "refund", ratio, deductFees: true });
   }
-  if (hours > TRANSFER_MIN_HOURS) out.push({ kind: "transfer" });
+  out.push({ kind: "transfer" }); // retreats: transfer allowed until start
   return out;
 }
