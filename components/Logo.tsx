@@ -1,10 +1,23 @@
-﻿import Link from "next/link";
+import Image from "next/image";
+import Link from "next/link";
 
-// Text wordmark until the logo file is supplied; swap the span for an <Image>.
-export default function Logo() {
+const SRC = {
+  navy: "/brand/wordmark-navy.png",
+  ivory: "/brand/wordmark-ivory.png",
+} as const;
+
+// Trimmed wordmark files are 1200x366.
+export default function Logo({ variant = "navy" }: { variant?: "navy" | "ivory" }) {
   return (
-    <Link href="/" aria-label="Ef Zin home" className="font-serif text-xl tracking-[0.18em] sm:text-2xl">
-      EF ζIN
+    <Link href="/" aria-label="Ef Zin home" className="inline-flex items-center">
+      <Image
+        src={SRC[variant]}
+        alt="Ef Zin"
+        width={1200}
+        height={366}
+        priority
+        className="h-6 w-auto sm:h-8"
+      />
     </Link>
   );
 }

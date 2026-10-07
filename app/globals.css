@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
-/* approximate — replace with brand kit codes */
+/* --navy, --choc and --ivory are exact (sampled from the official logo files); the rest are approximate. */
 :root {
-  --navy: #1F3A5A;
-  --ivory: #FBF8EF;
+  --navy: #1A405A;
+  --ivory: #FFFDF1;
   --olive: #3B3F2C;
-  --choc: #4A2A22;
+  --choc: #59352E;
   --sand: #D9C3A0;
   --teal: #2E6E8E;
   --stone: #6E6F5E;

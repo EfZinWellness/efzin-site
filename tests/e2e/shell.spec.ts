@@ -6,6 +6,7 @@ test("mobile shell: nav, book button, footer, no horizontal overflow", async ({ 
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: "Book" })).toBeVisible();
+  await expect(page.getByRole("banner").getByAltText("Ef Zin", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Menu" }).click();
   for (const label of ["Events", "Retreats", "Bespoke", "Coaching", "Journal", "About"]) {
