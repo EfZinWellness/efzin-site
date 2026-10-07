@@ -12,8 +12,10 @@ pillars: [move, thrive]
 status: on_sale
 baseCurrency: AED
 policy: standard_event
-heroImage: /images/events/flow-and-create/hero.jpg
-gallery: []
+heroImage: https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/cee95ff2-0b76-4c40-99cc-5505f733ec4b/Launch_Edited+Images_DSC06523.jpg?format=1500w
+gallery:
+  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/23eafd49-756f-494b-b3e8-314ea5358b4d/Launch_Edited+Images_DSC06490.jpg?format=1000w
+  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/dd98f027-4ef9-4f97-9ffb-d11820edeec4/Launch_Edited+Images_DSC06558.jpg?format=1000w
 summary: A grounding flow session followed by pottery painting.
 story: |
   Ground yourself with a flow session, then settle into pottery painting.

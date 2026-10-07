@@ -11,8 +11,11 @@ pillars: [move, nourish, thrive]
 status: interest
 baseCurrency: EUR
 policy: standard_retreat
-heroImage: /images/retreats/reform-athletica/hero.jpg
-gallery: []
+heroImage: https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/3622c356-7146-401e-843a-6a9a571c08a3/AEGEAN_SOULSEARCHRETREAT_DAY1_AA_-182+2.JPG?format=1500w
+gallery:
+  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/46bd5581-5937-4a45-acc1-e741db0892df/AEGEAN_SOULSEARCHRETREAT_DAY1_AA_-40+2.JPG?format=1000w
+  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/6bbae921-bf48-4c77-b675-8e71b1484bc8/AEGEAN_SOULSEARCHRETREAT_DAY1_AA_-32+2.JPG?format=1000w
+  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/f4f63d7e-1879-4020-b2aa-93f7e9ccd385/AEGEAN_SOULSEARCHRETREAT_DAY1_AA_-43+2.JPG?format=1000w
 summary: Movement, mindfulness, recovery, and nourishing Greek-inspired dining.
 story: |
   A wellness retreat with Reform Athletica in Greece: movement, mindfulness,

@@ -1,4 +1,4 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 
 /* approximate — replace with brand kit codes */
 :root {
@@ -33,3 +33,33 @@ body {
   color: var(--navy);
   font-family: var(--font-sans), Arial, sans-serif;
 }
+
+html { overflow-x: clip; }
+
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+.greek {
+  font-family: var(--font-greek), Georgia, serif;
+  font-style: italic;
+  color: var(--stone);
+}
+.btn {
+  display: inline-block;
+  border: 1px solid currentColor;
+  padding: 0.8rem 1.4rem;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.btn-solid {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: var(--ivory);
+}
+.fade-in { animation: fadein 1.2s ease both; }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .fade-in { animation: none; } }

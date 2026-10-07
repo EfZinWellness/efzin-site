@@ -1,13 +1,16 @@
-﻿import Link from "next/link";
+"use client";
 
-// Plain link for now; a later task turns this into the booking panel trigger.
+import { useBookPanel } from "./BookPanel";
+
 export default function BookButton() {
+  const { open } = useBookPanel();
   return (
-    <Link
-      href="/events"
+    <button
+      type="button"
+      onClick={open}
       className="inline-block bg-navy px-4 py-2.5 text-[10px] uppercase tracking-[0.22em] text-ivory"
     >
       Book
-    </Link>
+    </button>
   );
 }

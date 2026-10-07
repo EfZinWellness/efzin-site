@@ -1,11 +1,11 @@
-﻿import { test, expect } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 
 test.use({ viewport: { width: 375, height: 812 } });
 
 test("mobile shell: nav, book button, footer, no horizontal overflow", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("link", { name: "Book" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Book" })).toBeVisible();
 
   await page.getByRole("button", { name: "Menu" }).click();
   for (const label of ["Events", "Retreats", "Bespoke", "Coaching", "Journal", "About"]) {
