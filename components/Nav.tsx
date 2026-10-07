@@ -25,7 +25,7 @@ export default function Nav() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="relative border-b border-sand/60 text-choc">
+    <header className="relative border-b border-sand/60 text-navy">
       <nav aria-label="Main" className="flex items-center justify-between px-4 py-5 md:grid md:grid-cols-[1fr_auto_1fr] md:px-12">
         <button
           type="button"
