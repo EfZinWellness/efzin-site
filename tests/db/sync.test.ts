@@ -66,6 +66,27 @@ describe("syncContent", () => {
     expect(n.rows[0].n).toBe(3);
   });
 
+  it("rolls back the whole experience when a later ticket write fails", async () => {
+    const base = exps.find((e) => e.slug === "2026-10-04-strong-body-calm-mind")!;
+    // second ticket violates ticket_types.price_minor >= 0 (bypasses the Zod schema on purpose)
+    const broken: Experience = {
+      ...base,
+      tickets: [base.tickets[0], { ...base.tickets[1], priceMinor: -1 }],
+    };
+    const r = await syncContent(db, [broken]);
+    expect(r.upserted).toEqual([]);
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0]).toContain(base.slug);
+    const e = await db.query<{ n: number }>("select count(*)::int n from experiences");
+    const t = await db.query<{ n: number }>("select count(*)::int n from ticket_types");
+    expect(e.rows[0].n).toBe(0);
+    expect(t.rows[0].n).toBe(0);
+
+    // the connection is still usable and later experiences sync fine
+    const ok = await syncContent(db, exps);
+    expect(ok.errors).toEqual([]);
+  });
+
   it("errors and leaves DB unchanged when capacity drops below sold", async () => {
     await syncContent(db, exps);
     const slug = "2026-10-25-flow-and-create";

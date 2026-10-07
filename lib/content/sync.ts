@@ -18,11 +18,19 @@ export async function syncContent(db: SqlClient, experiences: Experience[]): Pro
   const report: SyncReport = { upserted: [], errors: [] };
 
   for (const e of experiences) {
+    let inTx = false;
     try {
-      const existing = await db.query<{ id: string }>("select id from experiences where slug = $1", [e.slug]);
+      await db.query("begin");
+      inTx = true;
+      const existing = await db.query<{ id: string }>(
+        "select id from experiences where slug = $1 for update",
+        [e.slug],
+      );
       const existingId = existing.rows[0]?.id;
 
       if (existingId) {
+        // Lock this experience's tickets so a concurrent booking cannot slip in between the sold check and the writes.
+        await db.query("select id from ticket_types where experience_id = $1 for update", [existingId]);
         const violations: string[] = [];
         for (const t of e.tickets) {
           const r = await db.query<{ sold: number }>(
@@ -41,6 +49,8 @@ export async function syncContent(db: SqlClient, experiences: Experience[]): Pro
           }
         }
         if (violations.length) {
+          await db.query("rollback");
+          inTx = false;
           report.errors.push(`${e.slug}: ${violations.join("; ")}; skipped`);
           continue;
         }
@@ -85,8 +95,17 @@ export async function syncContent(db: SqlClient, experiences: Experience[]): Pro
           [id, t.key, t.name, t.priceMinor, t.capacity],
         );
       }
+      await db.query("commit");
+      inTx = false;
       report.upserted.push(e.slug);
     } catch (err) {
+      if (inTx) {
+        try {
+          await db.query("rollback");
+        } catch {
+          // connection already unusable; the original error is what matters
+        }
+      }
       report.errors.push(`${e.slug}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
