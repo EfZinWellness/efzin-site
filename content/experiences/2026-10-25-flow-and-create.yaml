@@ -1,0 +1,31 @@
+slug: 2026-10-25-flow-and-create
+type: event
+title: "Flow & Create | Ef Zin x House of Raw"
+# PLACEHOLDER start/end times — confirm with Tanya
+startsAt: "2026-10-25T10:00:00+04:00"
+endsAt: "2026-10-25T13:00:00+04:00"
+timezone: Asia/Dubai
+venue:
+  name: House of Raw
+partner: House of Raw
+pillars: [move, thrive]
+status: on_sale
+baseCurrency: AED
+policy: standard_event
+heroImage: /images/events/flow-and-create/hero.jpg
+gallery: []
+summary: A grounding flow session followed by pottery painting.
+story: |
+  Ground yourself with a flow session, then settle into pottery painting.
+schedule:
+  - time: "10:00"
+    label: Grounding flow session
+  - time: "11:30"
+    label: Pottery painting
+tickets:
+  # PLACEHOLDER price/capacity — confirm with Tanya
+  - key: standard
+    name: Standard
+    priceMinor: 28000
+    capacity: 16
+faqs: []

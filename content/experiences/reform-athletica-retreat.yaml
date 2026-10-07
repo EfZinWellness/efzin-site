@@ -1,0 +1,23 @@
+slug: reform-athletica-retreat
+type: retreat
+title: "Ef Zin x Reform Athletica Wellness Retreat"
+# PLACEHOLDER dates — confirm with Tanya
+startsAt: "2027-05-01T10:00:00+03:00"
+endsAt: "2027-05-05T16:00:00+03:00"
+timezone: Europe/Athens
+venue:
+  name: Greece
+pillars: [move, nourish, thrive]
+status: interest
+baseCurrency: EUR
+policy: standard_retreat
+heroImage: /images/retreats/reform-athletica/hero.jpg
+gallery: []
+summary: Movement, mindfulness, recovery, and nourishing Greek-inspired dining.
+story: |
+  A wellness retreat with Reform Athletica in Greece: movement, mindfulness,
+  recovery, and nourishing Greek-inspired dining. Register your interest to hear
+  first when details and booking open.
+schedule: []
+tickets: []
+faqs: []

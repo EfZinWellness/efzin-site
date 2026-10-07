@@ -1,0 +1,37 @@
+slug: 2026-10-04-strong-body-calm-mind
+type: event
+title: "Strong Body, Calm Mind | Ef Zin x Rē"
+startsAt: "2026-10-04T12:45:00+04:00"
+endsAt: "2026-10-04T15:00:00+04:00"
+timezone: Asia/Dubai
+venue:
+  name: "Rē Social Wellness Club"
+  address: Dubai
+partner: "Rē"
+pillars: [move, thrive]
+status: on_sale # effective status becomes past automatically after endsAt
+baseCurrency: AED
+policy: standard_event
+heroImage: /images/events/strong-body-calm-mind/hero.jpg
+gallery: []
+summary: A vinyasa flow followed by a contrast therapy experience at Rē.
+story: |
+  Start with a strong, mindful vinyasa flow, then recover with Rē's signature
+  contrast therapy. Strong body, calm mind.
+schedule:
+  - time: "12:45"
+    label: Vinyasa Flow with Tanya
+  - time: "14:00"
+    label: Rē Signature Rēvive Experience (contrast therapy with Hadi El Khoury)
+tickets:
+  # PLACEHOLDER price/capacity — confirm with Tanya
+  - key: whole
+    name: Whole experience
+    priceMinor: 25000
+    capacity: 16
+  # PLACEHOLDER price/capacity — confirm with Tanya
+  - key: contrast
+    name: Contrast only
+    priceMinor: 15000
+    capacity: 8
+faqs: []

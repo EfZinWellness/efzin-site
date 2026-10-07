@@ -62,6 +62,7 @@ export type Experience = {
 export type TicketType = {
   id: string;
   experience_id: string;
+  key: string;
   name: string;
   price_minor: number;
   capacity: number;

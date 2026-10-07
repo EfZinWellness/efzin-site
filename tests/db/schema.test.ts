@@ -28,7 +28,7 @@ async function experience() {
 
 async function ticket(experienceId: string, capacity: number) {
   const r = await one<{ id: string }>(
-    "insert into ticket_types (experience_id, name, price_minor, capacity) values ($1, 'GA', 10000, $2) returning id",
+    "insert into ticket_types (experience_id, key, name, price_minor, capacity) values ($1, 'ga', 'GA', 10000, $2) returning id",
     [experienceId, capacity],
   );
   return r.id;
