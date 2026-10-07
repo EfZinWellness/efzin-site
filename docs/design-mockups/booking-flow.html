@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ef Zin — Booking Flow</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Montserrat:wght@300;400;500&family=Noto+Serif+Display:ital,wght@0,300;1,300&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#1F3A5A;--ivory:#FBF8EF;--stone:#6E6F5E;--sand:#D9C3A0;--line:#E4DDCF;--teal:#2E6E8E;
+--serif:'Playfair Display',Georgia,serif;--sans:'Montserrat',Arial,sans-serif;--greek:'Noto Serif Display',Georgia,serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#ECE8DF;font-family:var(--sans);color:var(--navy);padding:32px 16px 60px}
+.intro{max-width:1180px;margin:0 auto 28px}
+.intro h1{font-family:var(--serif);font-weight:400;font-size:30px}
+.intro p{font-size:14px;line-height:1.6;color:#555;margin-top:8px;max-width:760px}
+.row{max-width:1180px;margin:0 auto;display:flex;gap:28px;flex-wrap:wrap;justify-content:center}
+.step{width:270px}
+.step .lbl{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#777;margin-bottom:10px}
+.step .lbl b{font-family:var(--serif);font-size:20px;letter-spacing:0;color:var(--navy);margin-right:6px;font-weight:400}
+.phone{width:270px;height:560px;border-radius:34px;background:#111;padding:9px;box-shadow:0 14px 40px rgba(0,0,0,.18)}
+.scr{width:100%;height:100%;border-radius:26px;overflow:hidden;background:var(--ivory);position:relative;font-size:11px}
+.note{font-size:12px;line-height:1.55;color:#555;margin-top:12px}
+img{display:block;width:100%;height:100%;object-fit:cover}
+.top{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;font-size:8px;letter-spacing:.2em;text-transform:uppercase}
+.top .logo{font-family:var(--serif);font-size:14px;letter-spacing:.18em}
+.hero{height:230px;position:relative}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 45%,rgba(20,30,45,.55))}
+.hero .cap{position:absolute;left:14px;right:14px;bottom:14px;color:var(--ivory);z-index:1}
+.hero .cap .m{font-size:7.5px;letter-spacing:.22em;text-transform:uppercase}
+.hero .cap h3{font-family:var(--serif);font-weight:400;font-size:21px;margin-top:4px}
+.body{padding:16px 16px 0}
+.body p{line-height:1.6;color:#4d4d4d;font-size:10.5px}
+.gk{font-family:var(--greek);font-style:italic;color:var(--stone);font-size:10px}
+.sched{margin-top:14px;border-top:1px solid var(--line)}
+.sched div{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:10px}
+.scarcity{font-size:9px;color:var(--teal);margin-top:10px;letter-spacing:.05em}
+.sticky{position:absolute;left:0;right:0;bottom:0;background:var(--navy);color:var(--ivory);display:flex;justify-content:space-between;align-items:center;padding:14px 16px}
+.sticky .p{font-size:11px}.sticky .p small{display:block;opacity:.7;font-size:8.5px;margin-top:2px}
+.sticky .b{font-size:8.5px;letter-spacing:.22em;text-transform:uppercase;border:1px solid var(--ivory);padding:8px 14px}
+.sheet{padding:16px}
+.sheet h4{font-family:var(--serif);font-weight:400;font-size:17px}
+.sheet .sub{font-size:9.5px;color:#777;margin-top:3px}
+.tk{border:1px solid var(--line);padding:10px 12px;margin-top:10px;display:flex;justify-content:space-between;align-items:center;background:#fff}
+.tk.sel{border-color:var(--navy)}
+.tk .n{font-size:10.5px}.tk .n small{display:block;color:#888;font-size:8.5px;margin-top:2px}
+.qty{display:flex;gap:8px;align-items:center;font-size:11px}
+.qty i{width:18px;height:18px;border:1px solid var(--navy);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px}
+.sec{font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:#888;margin:16px 0 6px}
+.in{border-bottom:1px solid #cfc7b6;padding:7px 0;font-size:10px;color:#999}
+.in.f{color:var(--navy)}
+.guest{background:#fff;border:1px solid var(--line);padding:10px 12px;margin-top:8px;font-size:10px}
+.guest small{display:block;color:#888;font-size:8.5px;margin-top:3px}
+.pay{position:absolute;left:16px;right:16px;bottom:16px}
+.apple{background:#000;color:#fff;text-align:center;padding:11px;font-size:11px;border-radius:6px}
+.card{text-align:center;padding:10px;font-size:9px;letter-spacing:.18em;text-transform:uppercase;border:1px solid var(--navy);margin-top:8px}
+.tot{display:flex;justify-content:space-between;font-size:10.5px;margin:0 0 10px}
+.tot small{color:#888;font-size:8.5px}
+.done{padding:26px 18px;text-align:center}
+.done .tick{width:44px;height:44px;border:1px solid var(--navy);border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:18px}
+.done h4{font-family:var(--serif);font-weight:400;font-size:19px;margin-top:14px}
+.done p{font-size:10px;line-height:1.6;color:#555;margin-top:8px}
+.task{text-align:left;background:#fff;border:1px solid var(--line);padding:11px 12px;margin-top:10px;font-size:10px;display:flex;justify-content:space-between;align-items:center}
+.task small{display:block;color:#888;font-size:8.5px;margin-top:2px}
+.task .go{font-size:8px;letter-spacing:.18em;text-transform:uppercase;color:var(--teal)}
+.task.ok .go{color:#6b8f5e}
+.acct{margin-top:16px;padding:12px;background:var(--sand);font-size:9.5px;line-height:1.55;color:#4a2a22;text-align:left}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>Booking an event on a phone, in direction A</h1>
+  <p>The whole journey from tapping the Instagram link to a confirmed booking: four screens and no account needed beforehand. Tell me in the chat what feels right and what you'd change.</p>
+</div>
+
+<div class="row">
+  <!-- 1 -->
+  <div class="step">
+    <div class="lbl"><b>1</b>Event page</div>
+    <div class="phone"><div class="scr">
+      <div class="top"><span>☰</span><span class="logo">EF ζIN</span><span>👤</span></div>
+      <div class="hero"><img src="https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/1f742461-132b-4bd7-806f-6535531f1b68/Copy+of+Re+-078.jpg?format=1000w" alt="">
+        <div class="cap"><div class="m">Sat 4 Oct · Rē, Dubai</div><h3>Strong Body, Calm Mind</h3></div></div>
+      <div class="body">
+        <div class="gk">Κίνηση · Ευημερία</div>
+        <p style="margin-top:6px">A grounding vinyasa flow, followed by a guided contrast therapy ritual (heat, cold, breath) with Rē.</p>
+        <div class="sched"><div><span>12:45</span><span>Vinyasa Flow with Tanya</span></div><div><span>14:00</span><span>Rē Signature Rēvive</span></div></div>
+        <div class="scarcity">Only 4 spots left</div>
+      </div>
+      <div class="sticky"><div class="p">AED 250<small>≈ £54 · your currency at checkout</small></div><div class="b">Book</div></div>
+    </div></div>
+    <div class="note">The price shows in the guest's own currency. The <b>Book</b> bar stays at the bottom of the screen the whole time they scroll.</div>
+  </div>
+
+  <!-- 2 -->
+  <div class="step">
+    <div class="lbl"><b>2</b>Tickets &amp; guests</div>
+    <div class="phone"><div class="scr">
+      <div class="sheet">
+        <h4>Choose your experience</h4><div class="sub">Sat 4 Oct · Rē, Dubai</div>
+        <div class="tk sel"><div class="n">Whole experience<small>Flow + contrast therapy</small></div><div class="qty"><i>−</i>2<i>+</i></div></div>
+        <div class="tk"><div class="n">Contrast only<small>14:00 – 15:00</small></div><div class="qty"><i>−</i>0<i>+</i></div></div>
+        <div class="sec">Your details</div>
+        <div class="in f">Layla Haddad</div><div class="in f">layla@email.com</div><div class="in f">+971 50 ··· ····</div>
+        <div class="sec">Guest 2</div>
+        <div class="guest">Sara Nassar · sara@email.com<small>Sara will get a link to add her health details &amp; waiver</small></div>
+      </div>
+    </div></div>
+    <div class="note">The booker enters each friend's name and email. Every guest becomes their own record in your CRM.</div>
+  </div>
+
+  <!-- 3 -->
+  <div class="step">
+    <div class="lbl"><b>3</b>Pay</div>
+    <div class="phone"><div class="scr">
+      <div class="sheet">
+        <h4>Review &amp; pay</h4><div class="sub">2 × Whole experience</div>
+        <div class="sec">Have a code?</div><div class="in">Reward or gift code</div>
+      </div>
+      <div class="pay">
+        <div class="tot"><span>Total</span><span>£108.40 <small>(AED 500)</small></span></div>
+        <div class="apple"> Pay</div>
+        <div class="card">Pay by card</div>
+        <div style="text-align:center;font-size:8px;color:#999;margin-top:8px">Secured by Stripe · charged in GBP</div>
+      </div>
+    </div></div>
+    <div class="note">Stripe shows the guest's local currency automatically, with Apple Pay and Google Pay. Reward codes go in here.</div>
+  </div>
+
+  <!-- 4 -->
+  <div class="step">
+    <div class="lbl"><b>4</b>Confirmed</div>
+    <div class="phone"><div class="scr">
+      <div class="done">
+        <div class="tick">✓</div>
+        <h4>You're in, Layla.</h4>
+        <p>See you at Rē on Saturday. We've emailed your confirmation and a calendar invite.</p>
+        <div class="task"><div>Health details &amp; waiver<small>Takes 1 minute</small></div><span class="go">Complete →</span></div>
+        <div class="task"><div>Sara's details<small>Link sent to Sara</small></div><span class="go">Pending</span></div>
+        <div class="acct">✨ Your Ef Zin account is ready. Sign in any time with your email to see your bookings. No password needed.</div>
+      </div>
+    </div></div>
+    <div class="note">The account is created automatically. Health details and the waiver come <i>after</i> payment, so nothing slows the booking down.</div>
+  </div>
+</div>
+</body>
+</html>
