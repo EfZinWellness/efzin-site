@@ -2,7 +2,7 @@
 
 export default defineConfig({
   test: {
-    include: ["tests/unit/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts", "tests/db/**/*.test.ts"],
     passWithNoTests: true,
   },
 });
