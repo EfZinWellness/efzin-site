@@ -1,5 +1,5 @@
 import type { Experience } from "@/lib/content/schema";
-import { getSpotsLeft, minSpots } from "@/lib/booking/availability";
+import { getSpotsLeftMany, minSpots } from "@/lib/booking/availability";
 import { isDubai } from "@/lib/format";
 import { ratesSubset } from "@/lib/pricing/visitor";
 import ExperienceCard from "./ExperienceCard";
@@ -13,6 +13,7 @@ export default async function ExperienceGrid({
   visitorCurrency: string | null;
   rates: Record<string, number>;
 }) {
+  const spots = await getSpotsLeftMany(experiences.map((e) => e.slug));
   const items = await Promise.all(
     experiences.map(async (e, idx) => ({
       key: e.slug,
@@ -23,7 +24,7 @@ export default async function ExperienceGrid({
           experience={e}
           visitorCurrency={visitorCurrency}
           rates={ratesSubset(rates, [e.baseCurrency, visitorCurrency])}
-          minSpots={minSpots(await getSpotsLeft(e.slug))}
+          minSpots={minSpots(spots?.[e.slug])}
           priority={idx === 0}
         />
       ),

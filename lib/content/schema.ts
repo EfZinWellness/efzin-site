@@ -44,6 +44,10 @@ export const ExperienceSchema = z
     tickets: z.array(TicketSchema).default([]),
     depositPct: z.number().int().min(1).max(100).optional(),
     totalPriceMinor: z.number().int().min(0).optional(),
+    whoItsFor: z.string().optional(),
+    accommodation: z.string().optional(),
+    included: z.array(z.string()).default([]),
+    notIncluded: z.array(z.string()).default([]),
     faqs: z.array(z.object({ q: z.string(), a: z.string() })).default([]),
   })
   .superRefine((e, ctx) => {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import Logo from "@/components/Logo";
 import PriceTag from "@/components/PriceTag";
 import { loadUpcoming } from "@/lib/content/listing";
+import { effectiveStatus } from "@/lib/content/load";
 import { bookHref, detailHref, formatRange, formatWhen, headlinePrice, interestHref } from "@/lib/format";
 import { getPricingContext } from "@/lib/pricing/context";
 import { ratesSubset } from "@/lib/pricing/visitor";
@@ -11,7 +12,9 @@ export const metadata = { title: "Now | Ef Zin", description: TAGLINE };
 
 /** Link-in-bio page: always shows what is currently on sale. */
 export default async function NowPage() {
-  const [list, ctx] = await Promise.all([loadUpcoming(), getPricingContext()]);
+  const [upcomingList, ctx] = await Promise.all([loadUpcoming(), getPricingContext()]);
+  const now = new Date();
+  const list = upcomingList.filter((e) => effectiveStatus(e, now) === "on_sale");
   return (
     <div className="mx-auto max-w-md px-4 py-14 text-center">
       <Logo />

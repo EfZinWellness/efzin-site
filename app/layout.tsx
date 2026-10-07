@@ -5,7 +5,7 @@ import Footer from "@/components/Footer";
 import PriceTag from "@/components/PriceTag";
 import { BookPanelProvider, type PanelItem } from "@/components/BookPanel";
 import { loadExperiences, upcoming } from "@/lib/content/load";
-import { getSpotsLeft, minSpots } from "@/lib/booking/availability";
+import { getSpotsLeftMany, minSpots } from "@/lib/booking/availability";
 import { spotsLeftLabel } from "@/lib/booking/spots";
 import { bookHref, formatWhen, headlinePrice } from "@/lib/format";
 import { getPricingContext } from "@/lib/pricing/context";
@@ -43,6 +43,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     .filter((e) => e.status === "on_sale")
     .slice(0, 4);
   const { visitorCurrency, rates } = await getPricingContext();
+  const spots = await getSpotsLeftMany(bookable.map((e) => e.slug));
   const items: PanelItem[] = await Promise.all(
     bookable.map(async (e) => {
       const price = headlinePrice(e);
@@ -60,7 +61,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               rates={ratesSubset(rates, [e.baseCurrency, visitorCurrency])}
             />
           ),
-        spotsLabel: spotsLeftLabel(minSpots(await getSpotsLeft(e.slug))),
+        spotsLabel: spotsLeftLabel(minSpots(spots?.[e.slug])),
       };
     }),
   );

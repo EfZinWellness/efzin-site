@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import ExperienceCard from "@/components/ExperienceCard";
 import { loadUpcoming } from "@/lib/content/listing";
-import { getSpotsLeft, minSpots } from "@/lib/booking/availability";
+import { getSpotsLeftMany, minSpots } from "@/lib/booking/availability";
 import { INSTAGRAM_GRID, PHOTOS, photo } from "@/lib/images";
 import { PILLARS, type Pillar } from "@/lib/pillars";
 import { getPricingContext } from "@/lib/pricing/context";
@@ -21,12 +21,14 @@ export default async function Home() {
   const events = list.filter((e) => e.type === "event").slice(0, 3);
   const retreat = list.find((e) => e.type === "retreat");
 
+  const spots = await getSpotsLeftMany(list.map((e) => e.slug));
+
   const card = async (e: Experience, priority = false) => (
     <ExperienceCard
       experience={e}
       visitorCurrency={ctx.visitorCurrency}
       rates={ratesSubset(ctx.rates, [e.baseCurrency, ctx.visitorCurrency])}
-      minSpots={minSpots(await getSpotsLeft(e.slug))}
+      minSpots={minSpots(spots?.[e.slug])}
       priority={priority}
     />
   );

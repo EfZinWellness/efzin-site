@@ -33,7 +33,7 @@ describe("policyCopy", () => {
   it("retreat wording", () => {
     const t = policyCopy("standard_retreat").join(" ");
     expect(t).toMatch(/60 days/);
-    expect(t).toMatch(/50%/);
+    expect(t).toMatch(/above 50% of the total retreat price/);
     expect(t).toMatch(/10 days/);
   });
 });

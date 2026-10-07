@@ -68,6 +68,7 @@ test("/now lists what is on sale", async ({ page }) => {
   await page.goto("/now");
   await expect(page.getByRole("link", { name: /Flow & Create/ }).first()).toBeVisible();
   await expect(page.getByText("Strong Body")).toHaveCount(0);
+  await expect(page.getByText("Reform Athletica")).toHaveCount(0);
   await noHorizontalScroll(page);
 });
 
@@ -78,6 +79,8 @@ test("retreat with interest status: Register interest and WhatsApp", async ({ pa
     /\/bespoke\?type=retreat_interest&slug=reform-athletica-retreat/,
   );
   await expect(page.locator('a[href^="https://wa.me/"]').first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Speak to Tanya" }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Who it/ })).toBeVisible();
   await noHorizontalScroll(page);
 });
 

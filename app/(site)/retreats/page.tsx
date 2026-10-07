@@ -1,6 +1,6 @@
 import ExperienceCard from "@/components/ExperienceCard";
 import { loadExperiences, effectiveStatus } from "@/lib/content/load";
-import { getSpotsLeft, minSpots } from "@/lib/booking/availability";
+import { getSpotsLeftMany, minSpots } from "@/lib/booking/availability";
 import { getPricingContext } from "@/lib/pricing/context";
 import { ratesSubset } from "@/lib/pricing/visitor";
 
@@ -10,6 +10,7 @@ export default async function RetreatsPage() {
   const now = new Date();
   const [all, ctx] = await Promise.all([loadExperiences(), getPricingContext()]);
   const retreats = all.filter((e) => e.type === "retreat" && e.status !== "draft" && effectiveStatus(e, now) !== "past");
+  const spots = await getSpotsLeftMany(retreats.map((e) => e.slug));
   return (
     <div className="mx-auto max-w-5xl px-4 py-14">
       <p className="greek text-center text-sm">εὖ ζῆν</p>
@@ -25,7 +26,7 @@ export default async function RetreatsPage() {
                 experience={e}
                 visitorCurrency={ctx.visitorCurrency}
                 rates={ratesSubset(ctx.rates, [e.baseCurrency, ctx.visitorCurrency])}
-                minSpots={minSpots(await getSpotsLeft(e.slug))}
+                minSpots={minSpots(spots?.[e.slug])}
                 priority={idx === 0}
               />
             </li>

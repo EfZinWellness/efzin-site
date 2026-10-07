@@ -14,7 +14,7 @@ export function policyCopy(template: PolicyTemplate): string[] {
   }
   return [
     "More than 60 days before arrival: full refund of amounts paid, minus Stripe processing fees.",
-    "30 to 60 days before arrival: 50% of the total retreat price is refunded, minus Stripe processing fees.",
+    "30 to 60 days before arrival: we refund anything you have paid above 50% of the total retreat price, minus Stripe processing fees.",
     "Within 30 days of arrival: no refund; you may transfer your place to another person.",
     "Payment plan balance is due 10 days before arrival; a missed payment cancels the booking under these rules.",
     "If Ef Zin cancels: full refund, or transfer to a future experience, your choice.",

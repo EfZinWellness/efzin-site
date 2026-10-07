@@ -52,6 +52,13 @@ export default async function ExperienceDetail({ experience: e }: { experience: 
           {status === "past" ? <p className="mt-6 text-sm text-stone">This experience has taken place.</p> : null}
         </section>
 
+        {isRetreat && e.whoItsFor ? (
+          <section className="border-t border-sand/60 py-10">
+            <h2 className="font-serif text-2xl">Who it&rsquo;s for</h2>
+            <p className="mt-3 text-sm leading-7 text-navy/80">{e.whoItsFor}</p>
+          </section>
+        ) : null}
+
         {e.schedule.length > 0 ? (
           <section className="border-t border-sand/60 py-10">
             <h2 className="font-serif text-2xl">{isRetreat ? "Daily rhythm" : "Schedule"}</h2>
@@ -97,6 +104,34 @@ export default async function ExperienceDetail({ experience: e }: { experience: 
           </section>
         ) : null}
 
+        {isRetreat && e.accommodation ? (
+          <section className="border-t border-sand/60 py-10">
+            <h2 className="font-serif text-2xl">Accommodation</h2>
+            <p className="mt-3 text-sm leading-7 text-navy/80">{e.accommodation}</p>
+          </section>
+        ) : null}
+
+        {isRetreat && (e.included.length > 0 || e.notIncluded.length > 0) ? (
+          <section className="border-t border-sand/60 py-10">
+            {e.included.length > 0 ? (
+              <>
+                <h2 className="font-serif text-2xl">What&rsquo;s included</h2>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-navy/80">
+                  {e.included.map((i) => <li key={i}>{i}</li>)}
+                </ul>
+              </>
+            ) : null}
+            {e.notIncluded.length > 0 ? (
+              <>
+                <h2 className="mt-8 font-serif text-2xl">Not included</h2>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-navy/80">
+                  {e.notIncluded.map((i) => <li key={i}>{i}</li>)}
+                </ul>
+              </>
+            ) : null}
+          </section>
+        ) : null}
+
         {status === "interest" ? (
           <section className="border-t border-sand/60 py-10 text-center">
             <h2 className="font-serif text-2xl">Dates and details to be confirmed</h2>
@@ -105,8 +140,14 @@ export default async function ExperienceDetail({ experience: e }: { experience: 
             </p>
             <div className="mt-6 flex flex-col items-center gap-3">
               <Link href={interestHref(e.slug)} className="btn btn-solid">Register interest</Link>
-              <a href={WHATSAPP_URL} className="btn">Speak to Tanya</a>
             </div>
+          </section>
+        ) : null}
+
+        {isRetreat ? (
+          <section className="border-t border-sand/60 py-10 text-center">
+            <p className="text-sm text-navy/80">Questions about the retreat? Talk to Tanya directly.</p>
+            <a href={WHATSAPP_URL} className="btn mt-4">Speak to Tanya</a>
           </section>
         ) : null}
 

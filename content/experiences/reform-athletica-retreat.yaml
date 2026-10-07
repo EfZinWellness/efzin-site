@@ -24,3 +24,20 @@ story: |
 schedule: []
 tickets: []
 faqs: []
+# PLACEHOLDER copy
+whoItsFor: >-
+  Anyone craving time to slow down: beginners and seasoned practitioners alike,
+  travelling solo or with a friend.
+# PLACEHOLDER copy
+accommodation: >-
+  A calm, light-filled stay in Greece, shared or private rooms. Details to be confirmed.
+# PLACEHOLDER copy
+included:
+  - Daily movement and mindfulness sessions
+  - Nourishing Greek-inspired meals
+  - Recovery sessions
+# PLACEHOLDER copy
+notIncluded:
+  - Flights
+  - Travel insurance
+  - Personal expenses
