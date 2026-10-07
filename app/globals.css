@@ -1,0 +1,35 @@
+﻿@import "tailwindcss";
+
+/* approximate — replace with brand kit codes */
+:root {
+  --navy: #1F3A5A;
+  --ivory: #FBF8EF;
+  --olive: #3B3F2C;
+  --choc: #4A2A22;
+  --sand: #D9C3A0;
+  --teal: #2E6E8E;
+  --stone: #6E6F5E;
+  --sage: #A8A68A;
+  --oxblood: #5C3230;
+}
+
+@theme inline {
+  --color-navy: var(--navy);
+  --color-ivory: var(--ivory);
+  --color-olive: var(--olive);
+  --color-choc: var(--choc);
+  --color-sand: var(--sand);
+  --color-teal: var(--teal);
+  --color-stone: var(--stone);
+  --color-sage: var(--sage);
+  --color-oxblood: var(--oxblood);
+  --font-serif: var(--font-serif);
+  --font-sans: var(--font-sans);
+  --font-greek: var(--font-greek);
+}
+
+body {
+  background: var(--ivory);
+  color: var(--choc);
+  font-family: var(--font-sans), Arial, sans-serif;
+}
