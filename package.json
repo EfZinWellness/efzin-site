@@ -15,9 +15,11 @@
   "dependencies": {
     "gray-matter": "^4.0.3",
     "next": "16.4.0",
+    "next-mdx-remote": "^6.0.0",
     "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "resend": "^6.32.1",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },

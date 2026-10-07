@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import ExperienceCard from "@/components/ExperienceCard";
+import NewsletterForm from "@/components/NewsletterForm";
 import { loadUpcoming } from "@/lib/content/listing";
 import { getSpotsLeftMany, minSpots } from "@/lib/booking/availability";
 import { INSTAGRAM_GRID, PHOTOS, photo } from "@/lib/images";
@@ -157,18 +158,7 @@ export default async function Home() {
       <section data-testid="section-newsletter" className="bg-navy px-4 py-16 text-center text-ivory">
         <h2 className="font-serif text-2xl">Stay close</h2>
         <p className="mx-auto mt-2 max-w-sm text-sm text-ivory/80">New dates, recipes and the occasional letter. Nothing more.</p>
-        <form method="post" action="/api/newsletter" className="mx-auto mt-6 flex max-w-sm flex-col gap-3">
-          <label htmlFor="nl-email" className="sr-only">Email address</label>
-          <input
-            id="nl-email"
-            name="email"
-            type="email"
-            required
-            placeholder="Your email"
-            className="border-b border-ivory/60 bg-transparent px-1 py-2 text-sm text-ivory placeholder:text-ivory/60 focus:outline-none"
-          />
-          <button type="submit" className="btn">Subscribe</button>
-        </form>
+        <NewsletterForm />
       </section>
     </>
   );
