@@ -59,14 +59,15 @@ export async function syncContent(db: SqlClient, experiences: Experience[]): Pro
       const up = await db.query<{ id: string }>(
         `insert into experiences
            (slug, type, title, start_at, end_at, venue, pillars, status, base_currency,
-            policy_template, deposit_pct, total_price_minor, timezone)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            policy_template, deposit_pct, total_price_minor, timezone, payment_options, max_instalments)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          on conflict (slug) do update set
            type = excluded.type, title = excluded.title, start_at = excluded.start_at,
            end_at = excluded.end_at, venue = excluded.venue, pillars = excluded.pillars,
            status = excluded.status, base_currency = excluded.base_currency,
            policy_template = excluded.policy_template, deposit_pct = excluded.deposit_pct,
-           total_price_minor = excluded.total_price_minor, timezone = excluded.timezone
+           total_price_minor = excluded.total_price_minor, timezone = excluded.timezone,
+           payment_options = excluded.payment_options, max_instalments = excluded.max_instalments
          returning id`,
         [
           e.slug,
@@ -82,6 +83,8 @@ export async function syncContent(db: SqlClient, experiences: Experience[]): Pro
           e.depositPct ?? null,
           e.totalPriceMinor ?? null,
           e.timezone,
+          e.paymentOptions,
+          e.maxInstalments,
         ],
       );
       const id = up.rows[0].id;

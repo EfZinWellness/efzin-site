@@ -40,6 +40,16 @@ describe("syncContent", () => {
       policy_template: "standard_event",
       timezone: "Asia/Dubai",
       balance_due_days: 10,
+      payment_options: ["full"],
+      max_instalments: 4,
+    });
+    const retreat = await db.query<Record<string, unknown>>(
+      "select * from experiences where slug = 'reform-athletica-retreat'",
+    );
+    expect(retreat.rows[0]).toMatchObject({
+      payment_options: ["full", "deposit_balance", "instalments"],
+      max_instalments: 4,
+      deposit_pct: 20,
     });
     expect(new Date(row.rows[0].start_at as string).toISOString()).toBe("2026-10-04T08:45:00.000Z");
 

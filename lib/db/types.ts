@@ -18,6 +18,7 @@ export type Person = {
   notes: string | null;
   created_at: string;
   imported_from: "squarespace" | null;
+  stripe_customer_id: string | null;
 };
 
 export type HealthProfile = {
@@ -37,6 +38,8 @@ export type Waiver = {
   version: string;
   accepted_at: string;
 };
+
+export type PaymentOption = "full" | "deposit_balance" | "instalments";
 
 export type ExperienceType = "event" | "retreat";
 export type ExperienceStatus = "draft" | "on_sale" | "interest" | "sold_out" | "past";
@@ -58,6 +61,8 @@ export type Experience = {
   balance_due_days: number;
   timezone: string;
   total_price_minor: number | null;
+  payment_options: PaymentOption[];
+  max_instalments: number;
 };
 
 export type TicketType = {
@@ -95,6 +100,12 @@ export type Booking = {
   policy_snapshot: Json | null;
   cancelled_by: "guest" | "efzin" | null;
   imported: boolean;
+  payment_option: PaymentOption | null;
+  total_price_minor: number | null;
+  gift_card_id: string | null;
+  gift_card_applied_aed_minor: number;
+  credit_applied_aed_minor: number;
+  schedule_consent_at: string | null;
   created_at: string;
 };
 
@@ -144,4 +155,81 @@ export type Request = {
 export type StripeEvent = {
   id: string;
   processed_at: string;
+};
+
+export type GiftCardStatus = "pending_payment" | "active" | "void" | "expired";
+
+export type GiftCard = {
+  id: string;
+  code: string;
+  initial_aed_minor: number;
+  balance_aed_minor: number;
+  status: GiftCardStatus;
+  buyer_person_id: string;
+  recipient_name: string | null;
+  recipient_email: string | null;
+  recipient_person_id: string | null;
+  message: string | null;
+  suggested_experience_id: string | null;
+  deliver_on: string | null;
+  delivered_at: string | null;
+  expires_at: string | null;
+  amount_paid_minor: number | null;
+  presentment_currency: string | null;
+  stripe_payment_intent: string | null;
+  purchase_batch_id: string | null;
+  created_at: string;
+};
+
+export type GiftCardLedgerReason = "issue" | "redeem" | "refund_return" | "expiry" | "void";
+
+export type GiftCardLedgerEntry = {
+  id: string;
+  gift_card_id: string;
+  booking_id: string | null;
+  amount_aed_minor: number;
+  reason: GiftCardLedgerReason;
+  created_at: string;
+};
+
+export type GiftCardBatch = {
+  id: string;
+  buyer_person_id: string;
+  quantity: number;
+  created_at: string;
+};
+
+export type GiftCardReservation = {
+  id: string;
+  gift_card_id: string;
+  pending_booking_id: string;
+  amount_aed_minor: number;
+  expires_at: string;
+  released_at: string | null;
+  created_at: string;
+};
+
+export type PendingBooking = {
+  id: string;
+  kind: string;
+  payload: Json;
+  hold_ids: string[];
+  reservation_ids: string[];
+  checkout_session_id: string | null;
+  created_at: string;
+};
+
+export type PaymentScheduleStatus = "scheduled" | "paid" | "failed" | "cancelled";
+
+export type PaymentScheduleItem = {
+  id: string;
+  booking_id: string;
+  seq: number;
+  due_on: string;
+  amount_minor: number;
+  currency: string;
+  status: PaymentScheduleStatus;
+  stripe_invoice_id: string | null;
+  attempts: number;
+  paid_at: string | null;
 };

@@ -28,9 +28,46 @@ describe("ExperienceSchema", () => {
     expect(ExperienceSchema.safeParse(base).success).toBe(true);
   });
 
-  it("rejects a retreat on_sale without depositPct", () => {
-    const r = ExperienceSchema.safeParse({ ...base, type: "retreat", policy: "standard_retreat", totalPriceMinor: 100000 });
+  it("rejects a retreat on_sale without totalPriceMinor", () => {
+    const r = ExperienceSchema.safeParse({ ...base, type: "retreat", policy: "standard_retreat", depositPct: 20 });
     expect(r.success).toBe(false);
+  });
+
+  it("defaults payment options for events", () => {
+    const r = ExperienceSchema.parse(base);
+    expect(r.paymentOptions).toEqual(["full"]);
+    expect(r.maxInstalments).toBe(4);
+    expect(r.depositPct).toBeUndefined();
+  });
+
+  it("defaults payment options, instalments and a 20% deposit for retreats", () => {
+    const r = ExperienceSchema.parse({ ...base, type: "retreat", policy: "standard_retreat", totalPriceMinor: 100000 });
+    expect(r.paymentOptions).toEqual(["full", "deposit_balance", "instalments"]);
+    expect(r.maxInstalments).toBe(4);
+    expect(r.depositPct).toBe(20);
+  });
+
+  it("keeps explicit payment settings", () => {
+    const r = ExperienceSchema.parse({
+      ...base,
+      type: "retreat",
+      policy: "standard_retreat",
+      totalPriceMinor: 100000,
+      depositPct: 30,
+      paymentOptions: ["full", "deposit_balance"],
+      maxInstalments: 3,
+    });
+    expect(r.paymentOptions).toEqual(["full", "deposit_balance"]);
+    expect(r.maxInstalments).toBe(3);
+    expect(r.depositPct).toBe(30);
+  });
+
+  it("rejects deposit options on an event without depositPct, and options without full", () => {
+    expect(ExperienceSchema.safeParse({ ...base, paymentOptions: ["full", "deposit_balance"] }).success).toBe(false);
+    expect(ExperienceSchema.safeParse({ ...base, paymentOptions: ["deposit_balance"], depositPct: 20 }).success).toBe(false);
+    expect(
+      ExperienceSchema.safeParse({ ...base, paymentOptions: ["full", "deposit_balance"], depositPct: 20 }).success,
+    ).toBe(true);
   });
 
   it("accepts a retreat on_sale with depositPct and totalPriceMinor", () => {

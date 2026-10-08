@@ -1,5 +1,5 @@
 /** 32 symbols, no I, O, 0 or 1. 32 divides 256 so `byte % 32` is unbiased. */
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const GIFT_RE = /^EFZG-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/;
 
 export function generateGiftCode(randomBytes: (n: number) => Uint8Array): string {

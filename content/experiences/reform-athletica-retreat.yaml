@@ -11,6 +11,10 @@ pillars: [move, nourish, thrive]
 status: interest
 baseCurrency: EUR
 policy: standard_retreat
+# Payment settings (also the retreat defaults); the deposit percentage is confirmed by Tanya.
+depositPct: 20
+paymentOptions: [full, deposit_balance, instalments]
+maxInstalments: 4
 heroImage: https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/3622c356-7146-401e-843a-6a9a571c08a3/AEGEAN_SOULSEARCHRETREAT_DAY1_AA_-182+2.JPG?format=1500w
 gallery:
   - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/46bd5581-5937-4a45-acc1-e741db0892df/AEGEAN_SOULSEARCHRETREAT_DAY1_AA_-40+2.JPG?format=1000w
