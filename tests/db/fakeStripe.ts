@@ -16,7 +16,15 @@ export class FakeStripe implements StripeApi {
   invoiceStatus: Record<string, InvoiceStatus> = {};
   invoiceCustomer: Record<string, string> = {};
   invoiceUpdates: { id: string; params: Stripe.InvoiceUpdateParams }[] = [];
+  invoiceTotal: Record<string, number> = {};
+  invoiceFinalized: { id: string; params?: Stripe.InvoiceFinalizeInvoiceParams }[] = [];
+  invoicePaid: string[] = [];
   voided: string[] = [];
+  /** Set to make the next invoiceItems.create / voidInvoice call throw (once). */
+  invoiceItemError: unknown = null;
+  voidError: unknown = null;
+  /** Max invoices per list page (to exercise pagination). */
+  pageSize = 10;
   /** Set to make the next create / expire call throw. */
   createError: unknown = null;
   expireError: unknown = null;
@@ -72,30 +80,47 @@ export class FakeStripe implements StripeApi {
       const id = `in_test_${this.invoicesCreated.length + 1}`;
       this.invoicesCreated.push({ id, params });
       this.invoiceStatus[id] = "draft";
+      this.invoiceTotal[id] = 0;
       if (params.customer) this.invoiceCustomer[id] = params.customer;
       return { id };
     },
-    retrieve: async (id: string) => ({ id, status: this.invoiceStatus[id] ?? null }),
-    finalizeInvoice: async (id: string) => {
+    retrieve: async (id: string) => ({
+      id,
+      status: this.invoiceStatus[id] ?? null,
+      total: this.invoiceTotal[id] ?? 0,
+      collection_method: (this.invoicesCreated.find((i) => i.id === id)?.params.collection_method ??
+        "charge_automatically") as Stripe.Invoice.CollectionMethod,
+    }),
+    finalizeInvoice: async (id: string, params?: Stripe.InvoiceFinalizeInvoiceParams) => {
+      this.invoiceFinalized.push({ id, params });
       this.invoiceStatus[id] = "open";
       return { id, status: "open" as InvoiceStatus };
     },
     pay: async (id: string) => {
       if (this.payError) throw this.payError;
+      this.invoicePaid.push(id);
       this.invoiceStatus[id] = "paid";
       return { id, status: "paid" as InvoiceStatus };
     },
     voidInvoice: async (id: string) => {
+      if (this.voidError) {
+        const e = this.voidError;
+        this.voidError = null;
+        throw e;
+      }
       this.voided.push(id);
       this.invoiceStatus[id] = "void";
       return { id };
     },
-    list: async (params: Stripe.InvoiceListParams) => ({
-      data: Object.keys(this.invoiceStatus)
-        .filter((id) => (!params.status || this.invoiceStatus[id] === params.status))
-        .filter((id) => !params.customer || this.invoiceCustomer[id] === params.customer)
-        .map((id) => ({ id })),
-    }),
+    list: async (params: Stripe.InvoiceListParams) => {
+      const all = Object.keys(this.invoiceStatus)
+        .filter((id) => !params.status || this.invoiceStatus[id] === params.status)
+        .filter((id) => !params.customer || this.invoiceCustomer[id] === params.customer);
+      const start = params.starting_after ? all.indexOf(params.starting_after) + 1 : 0;
+      const size = Math.min(params.limit ?? 10, this.pageSize);
+      const page = all.slice(start, start + size);
+      return { data: page.map((id) => ({ id })), has_more: start + size < all.length };
+    },
     update: async (id: string, params: Stripe.InvoiceUpdateParams) => {
       this.invoiceUpdates.push({ id, params });
       return { id };
@@ -104,7 +129,13 @@ export class FakeStripe implements StripeApi {
 
   invoiceItems = {
     create: async (params: Stripe.InvoiceItemCreateParams) => {
+      if (this.invoiceItemError) {
+        const e = this.invoiceItemError;
+        this.invoiceItemError = null;
+        throw e;
+      }
       this.invoiceItemsCreated.push(params);
+      if (params.invoice) this.invoiceTotal[params.invoice] = (this.invoiceTotal[params.invoice] ?? 0) + (params.amount ?? 0);
       return { id: `ii_test_${this.invoiceItemsCreated.length}` };
     },
   };

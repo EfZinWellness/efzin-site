@@ -283,7 +283,7 @@ describe("startCheckout", () => {
     expect(b.rows[0]).toMatchObject({
       status: "deposit_paid",
       amount_paid_minor: 9200,
-      presentment_currency: "gbp",
+      presentment_currency: "GBP",
       amount_paid_base_minor: 96000,
       stripe_payment_intent: "pi_1",
       payment_option: "deposit_balance",

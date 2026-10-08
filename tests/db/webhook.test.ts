@@ -46,7 +46,7 @@ describe("checkout.session.completed (booking)", () => {
 
     expect(await count(w.db, "select * from bookings")).toBe(1);
     const b = (await w.db.query<Record<string, unknown>>("select * from bookings")).rows[0];
-    expect(b).toMatchObject({ status: "deposit_paid", amount_paid_minor: 9200, presentment_currency: "gbp" });
+    expect(b).toMatchObject({ status: "deposit_paid", amount_paid_minor: 9200, presentment_currency: "GBP" });
     expect(await count(w.db, "select * from booking_guests")).toBe(2);
     expect(await count(w.db, "select distinct person_id from booking_guests")).toBe(2);
     const items = await w.db.query<{ status: string }>("select status from payment_schedule_items order by seq");

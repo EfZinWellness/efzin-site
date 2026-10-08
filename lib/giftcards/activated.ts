@@ -11,6 +11,13 @@ export async function onGiftCardsActivated(db: SqlClient, paymentIntent: string)
   void paymentIntent;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** `batch_id` / `gift_card_id`, when present, must be UUIDs (they are cast in SQL). */
+export function giftMetadataValid(md: Record<string, string>): boolean {
+  return [md.batch_id, md.gift_card_id].every((v) => v === undefined || UUID_RE.test(v));
+}
+
 export interface GiftPurchasePaid {
   sessionId: string;
   paymentIntent: string;
@@ -29,6 +36,7 @@ export interface GiftPurchasePaid {
  */
 export async function activateGiftPurchase(db: SqlClient, paid: GiftPurchasePaid, now: Date): Promise<number> {
   const md = paid.metadata;
+  if (!giftMetadataValid(md)) throw new Error("GIFT_METADATA_INVALID");
   const cards = await db.query<{ id: string }>(
     `select id from gift_cards
       where status = 'pending_payment'
@@ -44,7 +52,7 @@ export async function activateGiftPurchase(db: SqlClient, paid: GiftPurchasePaid
   for (const [i, c] of cards.rows.entries()) {
     await db.query(
       "update gift_cards set stripe_payment_intent = $2, amount_paid_minor = $3, presentment_currency = $4 where id = $1",
-      [c.id, paid.paymentIntent, share + (i < extra ? 1 : 0), paid.presentmentCurrency],
+      [c.id, paid.paymentIntent, share + (i < extra ? 1 : 0), paid.presentmentCurrency.toUpperCase()],
     );
   }
   return activateGiftCards(db, paid.paymentIntent, now);

@@ -30,6 +30,35 @@ export function calendarDate(at: Date, timezone: string): string {
   }).format(at);
 }
 
+/** Milliseconds the timezone is ahead of UTC at instant `at`. */
+function tzOffsetMs(at: Date, timezone: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  );
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  return asUtc - Math.floor(at.getTime() / 1000) * 1000;
+}
+
+/** Unix seconds of 23:59:59 on calendar date `ymd` in `timezone`. */
+export function endOfDayEpoch(ymd: string, timezone: string): number {
+  const [y, m, d] = parse(ymd);
+  const local = Date.UTC(y, m - 1, d, 23, 59, 59);
+  let t = local - tzOffsetMs(new Date(local), timezone);
+  t = local - tzOffsetMs(new Date(t), timezone); // second pass settles a DST change that day
+  return Math.floor(t / 1000);
+}
+
 function parse(ymd: string): [number, number, number] {
   const [y, m, d] = ymd.split("-").map(Number);
   return [y, m, d];

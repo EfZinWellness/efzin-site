@@ -36,7 +36,12 @@ export interface StripeApi {
   };
   invoices: {
     create(params: Stripe.InvoiceCreateParams, options?: Stripe.RequestOptions): Promise<{ id: string }>;
-    retrieve(id: string): Promise<{ id: string; status: Stripe.Invoice.Status | null }>;
+    retrieve(id: string): Promise<{
+      id: string;
+      status: Stripe.Invoice.Status | null;
+      total: number;
+      collection_method: Stripe.Invoice.CollectionMethod;
+    }>;
     finalizeInvoice(
       id: string,
       params?: Stripe.InvoiceFinalizeInvoiceParams,
@@ -48,7 +53,7 @@ export interface StripeApi {
       options?: Stripe.RequestOptions,
     ): Promise<{ id: string; status: Stripe.Invoice.Status | null }>;
     voidInvoice(id: string): Promise<{ id: string }>;
-    list(params: Stripe.InvoiceListParams): Promise<{ data: { id: string }[] }>;
+    list(params: Stripe.InvoiceListParams): Promise<{ data: { id: string }[]; has_more: boolean }>;
     update(id: string, params: Stripe.InvoiceUpdateParams): Promise<{ id: string }>;
   };
   invoiceItems: {

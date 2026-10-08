@@ -104,7 +104,7 @@ export async function confirmPendingInTx(
       p.booker.personId,
       p.experienceId,
       payment?.amountPaidMinor ?? 0,
-      payment?.presentmentCurrency ?? p.baseCurrency,
+      (payment?.presentmentCurrency || p.baseCurrency).toUpperCase(),
       p.baseCurrency,
       payment?.paymentIntentId ?? null,
       p.option,

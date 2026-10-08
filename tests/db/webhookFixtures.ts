@@ -10,7 +10,7 @@ import { startCheckout } from "../../lib/stripe/checkout";
 import { activateGiftCards, issueGiftCards } from "../../lib/giftcards/db";
 import { issueCredit } from "../../lib/credits/db";
 import type { AuthAdmin } from "../../lib/auth/provision";
-import type { WebhookDeps } from "../../lib/stripe/handlers";
+import { handleStripeEvent, type WebhookDeps } from "../../lib/stripe/handlers";
 
 export const NOW = new Date("2027-01-10T09:00:00Z");
 export const RATES = { EUR: 0.92, USD: 1 };
@@ -192,6 +192,41 @@ export function completedBooking(
     payment_intent: `pi_${sessionId}`,
     setup_intent: null,
     customer: null,
+    ...over,
+  });
+}
+
+/** A confirmed retreat booking on a plan (deposit paid through Checkout with customer cus_test_1). */
+export async function planBooking(w: World, option: "deposit_balance" | "instalments" = "deposit_balance") {
+  const { pendingId, sessionId } = await checkout(w, RETREAT, {
+    lines: [{ ticketKey: "shared", qty: 1 }],
+    paymentOption: option,
+    scheduleConsent: true,
+  });
+  await handleStripeEvent(completedBooking("evt_book", pendingId, sessionId, { customer: "cus_test_1" }), w.deps);
+  const b = await w.db.query<{ id: string }>("select id from bookings");
+  const items = await w.db.query<{ id: string; seq: number; amount_minor: number }>(
+    "select id, seq, amount_minor from payment_schedule_items order by seq",
+  );
+  w.emails.length = 0;
+  return { bookingId: b.rows[0].id, items: items.rows };
+}
+
+export function invoiceEvent(
+  id: string,
+  type: string,
+  itemId: string,
+  bookingId: string,
+  over: Record<string, unknown> = {},
+): Stripe.Event {
+  return event(id, type, {
+    object: "invoice",
+    id: `in_${id}`,
+    metadata: { kind: "scheduled_payment", item_id: itemId, booking_id: bookingId },
+    amount_paid: 192000,
+    amount_due: 192000,
+    currency: "eur",
+    hosted_invoice_url: "https://invoice.stripe.test/i/1",
     ...over,
   });
 }

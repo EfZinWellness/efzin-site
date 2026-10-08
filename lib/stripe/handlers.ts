@@ -5,11 +5,12 @@ import { confirmPendingInTx, type ConfirmedPayment } from "../booking/confirm";
 import { releasePending, type PendingPayload } from "../booking/pending";
 import type { SqlClient } from "../content/sync";
 import { sendQuietly, type SendEmailFn } from "../email/send";
-import { activateGiftPurchase, onGiftCardsActivated } from "../giftcards/activated";
+import { activateGiftPurchase, giftMetadataValid, onGiftCardsActivated } from "../giftcards/activated";
 import { adminAddress } from "../requests/handlers";
 import { refId, type StripeApi } from "./client";
 import { processOnce, sequence, type AfterCommit } from "./events";
-import { bookingInvoices, onInvoiceFailed, onInvoicePaid, voidOpenInvoices } from "./invoices";
+import { onInvoiceFailed, onInvoicePaid } from "./invoiceEvents";
+import { bookingInvoices, voidOpenInvoices } from "./invoices";
 import { onChargeRefunded } from "./refunds";
 
 export interface WebhookDeps {
@@ -74,7 +75,7 @@ async function completeBooking(s: Stripe.Checkout.Session, pendingId: string | u
     s.mode === "payment" && s.amount_total != null
       ? {
           amountPaidMinor: s.amount_total,
-          presentmentCurrency: s.currency ?? "",
+          presentmentCurrency: (s.currency ?? "").toUpperCase(),
           ...(refId(s.payment_intent) ? { paymentIntentId: refId(s.payment_intent)! } : {}),
         }
       : null;
@@ -102,6 +103,18 @@ async function saveSessionCard(stripe: StripeApi, s: Stripe.Checkout.Session, cu
 async function completeGiftPurchase(s: Stripe.Checkout.Session, deps: WebhookDeps) {
   const pi = refId(s.payment_intent);
   if (!pi) throw new Error(`Gift purchase session ${s.id} has no payment intent`);
+  if (!giftMetadataValid(s.metadata ?? {})) {
+    // A retry cannot fix bad metadata: tell Tanya, record the event, don't fail.
+    return async () => {
+      await sendQuietly(deps.sendEmail, "admin_error", adminAddress(), {
+        context: "gift_purchase_bad_metadata",
+        problem: "A gift card purchase was paid but its session metadata is not valid, so no cards were activated.",
+        session: s.id,
+        paymentIntent: pi,
+        metadata: s.metadata,
+      });
+    };
+  }
   const n = await activateGiftPurchase(
     deps.db,
     {
@@ -172,8 +185,21 @@ async function completeUpdateCard(s: Stripe.Checkout.Session, deps: WebhookDeps)
   return async () => {
     const pm = await saveSessionCard(deps.stripe, s, c);
     if (!pm) return;
-    const open = await deps.stripe.invoices.list({ customer: c, status: "open" });
-    for (const inv of open.data) await deps.stripe.invoices.update(inv.id, { default_payment_method: pm });
+    // Collect every page first, then update (updating does not change which invoices are open).
+    const open: string[] = [];
+    let after: string | undefined;
+    for (;;) {
+      const page = await deps.stripe.invoices.list({
+        customer: c,
+        status: "open",
+        limit: 100,
+        ...(after ? { starting_after: after } : {}),
+      });
+      open.push(...page.data.map((i) => i.id));
+      if (!page.has_more || page.data.length === 0) break;
+      after = page.data[page.data.length - 1].id;
+    }
+    for (const id of open) await deps.stripe.invoices.update(id, { default_payment_method: pm });
   };
 }
 

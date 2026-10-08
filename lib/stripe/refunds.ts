@@ -28,7 +28,13 @@ export async function onChargeRefunded(charge: Stripe.Charge, deps: WebhookDeps)
   );
   const booking = b.rows[0];
   if (booking) {
-    if (!charge.refunded || !ACTIVE_BOOKING.has(booking.status)) return;
+    if (!charge.refunded) return;
+    // Void first, whatever the status: a booking already refunded or cancelled (e.g. on a retry
+    // after a failed void) must not keep open invoices that Stripe would go on charging.
+    // voidOpenInvoices only voids invoices that are still open, so repeating it is safe.
+    const invoices = await bookingInvoices(db, booking.id);
+    const voidStep = () => voidOpenInvoices(deps.stripe, invoices);
+    if (!ACTIVE_BOOKING.has(booking.status)) return voidStep;
     const later = await db.query<{ n: number }>(
       `select count(*)::int as n from payment_schedule_items
         where booking_id = $1 and seq > 0 and status = 'paid' and amount_minor > 0`,
@@ -39,17 +45,16 @@ export async function onChargeRefunded(charge: Stripe.Charge, deps: WebhookDeps)
       "update payment_schedule_items set status = 'cancelled' where booking_id = $1 and status in ('scheduled', 'failed')",
       [booking.id],
     );
-    // All of the booking's invoices (only open ones are voided), so a retry after a failed void still finds them.
-    const invoices = await bookingInvoices(db, booking.id);
     const unsettled = later.rows[0].n > 0 || booking.gift_card_applied_aed_minor > 0 || booking.credit_applied_aed_minor > 0;
+    // The alert (never throws) goes first: a retry after a failed void sees an inactive booking and only voids.
     return sequence(
-      () => voidOpenInvoices(deps.stripe, invoices),
       unsettled &&
         alert(
           "refund_needs_review",
           "A booking payment was fully refunded in Stripe and the booking is marked refunded, but other value was paid on it (later instalments, gift card or credit). Please settle the rest by hand.",
           { bookingId: booking.id, paidInstalments: later.rows[0].n },
         ),
+      voidStep,
     );
   }
 
