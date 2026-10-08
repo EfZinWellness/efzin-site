@@ -26,7 +26,7 @@ create table gift_card_batches (
 create table gift_cards (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
-  initial_aed_minor int not null check (initial_aed_minor > 0),
+  initial_aed_minor int not null check (initial_aed_minor between 10000 and 1000000),
   -- Always equals the sum of gift_card_ledger; only the functions below change it.
   balance_aed_minor int not null default 0 check (balance_aed_minor >= 0),
   status text not null default 'pending_payment'
@@ -81,6 +81,7 @@ create table gift_card_reservations (
   amount_aed_minor int not null check (amount_aed_minor > 0),
   expires_at timestamptz not null,
   released_at timestamptz, -- null = active (until expires_at)
+  redeemed_booking_id uuid references bookings (id),
   created_at timestamptz not null default now()
 );
 create index gift_card_reservations_card_idx on gift_card_reservations (gift_card_id);
@@ -130,7 +131,7 @@ create policy gift_cards_party_read on gift_cards
   using (buyer_person_id = current_person_id() or recipient_person_id = current_person_id());
 
 create policy payment_schedule_items_read on payment_schedule_items
-  for select to authenticated using (is_booking_participant(booking_id));
+  for select to authenticated using (is_booker_of(booking_id));
 
 -- ---------------------------------------------------------------------------
 -- Functions (service role only)
@@ -200,13 +201,23 @@ begin
   select * into v_card from gift_cards where id = v_res.gift_card_id for update;
   -- re-read under the lock
   select * into v_res from gift_card_reservations where id = p_reservation for update;
+  if v_res.redeemed_booking_id = p_booking then
+    return; -- already redeemed for this booking: idempotent
+  end if;
   if v_res.released_at is not null then
     raise exception 'RESERVATION_RELEASED';
+  end if;
+  -- A late payment: the hold lapsed, so its value may have been reserved by someone else.
+  -- gift_card_available already excludes this expired reservation.
+  if v_res.expires_at <= now() and gift_card_available(v_card.id) < v_res.amount_aed_minor then
+    raise exception 'RESERVATION_EXPIRED';
   end if;
   if v_card.status <> 'active' or v_card.balance_aed_minor < v_res.amount_aed_minor then
     raise exception 'GIFT_INSUFFICIENT';
   end if;
-  update gift_card_reservations set released_at = now() where id = p_reservation;
+  update gift_card_reservations
+     set released_at = now(), redeemed_booking_id = p_booking
+   where id = p_reservation;
   perform gift_card_ledger_add(v_card.id, p_booking, -v_res.amount_aed_minor, 'redeem');
   update gift_cards
      set recipient_person_id = coalesce(
@@ -219,13 +230,28 @@ $$;
 create function return_to_gift_card(p_card uuid, p_booking uuid, p_amount int)
 returns void
 language plpgsql security definer set search_path = public as $$
+declare
+  v_status text;
+  v_redeemed int;
+  v_returned int;
 begin
   if p_amount is null or p_amount < 1 then
     raise exception 'INVALID_AMOUNT';
   end if;
-  perform 1 from gift_cards where id = p_card for update;
+  select status into v_status from gift_cards where id = p_card for update;
   if not found then
     raise exception 'GIFT_INVALID';
+  end if;
+  -- Dead cards take nothing back; the caller issues a credit instead.
+  if v_status in ('expired', 'void') then
+    raise exception 'GIFT_NOT_RETURNABLE';
+  end if;
+  select coalesce(-sum(amount_aed_minor) filter (where reason = 'redeem'), 0)::int,
+         coalesce(sum(amount_aed_minor) filter (where reason = 'refund_return'), 0)::int
+    into v_redeemed, v_returned
+    from gift_card_ledger where gift_card_id = p_card and booking_id = p_booking;
+  if v_returned + p_amount > v_redeemed then
+    raise exception 'GIFT_RETURN_EXCEEDS_REDEEMED';
   end if;
   perform gift_card_ledger_add(p_card, p_booking, p_amount, 'refund_return');
 end

@@ -8,6 +8,7 @@ import {
   redeemReservation,
   releaseReservation,
   returnToGiftCard,
+  GiftReturnError,
   voidIfUnused,
   expireGiftCards,
   getGiftBalance,
@@ -169,8 +170,67 @@ describe("gift card lifecycle", () => {
     const row = await one<{ recipient_person_id: string }>("select recipient_person_id from gift_cards where id = $1", [c.id]);
     expect(row.recipient_person_id).toBe(friend);
 
-    // a second redeem of the same reservation is refused
-    await expect(redeemReservation(db, res, bk)).rejects.toThrow(/RESERVATION/);
+    // redeeming again for the same booking is a no-op
+    await redeemReservation(db, res, bk);
+    expect((await getGiftBalance(db, c.id))?.balanceAedMinor).toBe(20000);
+    const n = await one<{ n: number }>("select count(*)::int n from gift_card_ledger where reason = 'redeem'");
+    expect(n.n).toBe(1);
+    // for a different booking it is refused
+    await expect(redeemReservation(db, res, await booking(friend))).rejects.toThrow(/RESERVATION_RELEASED/);
+  });
+
+  it("a late redeem of a lapsed reservation fails if the value was taken by someone else", async () => {
+    const buyer = await person("b@example.com");
+    const c = await activeCard(buyer, 50000);
+    const resA = await reserveGiftCard(db, c.code, 30000, await pending(), FUTURE());
+    await db.query("update gift_card_reservations set expires_at = now() - interval '1 minute' where id = $1", [resA]);
+    const resB = await reserveGiftCard(db, c.code, 50000, await pending(), FUTURE());
+    await expect(redeemReservation(db, resA, await booking(buyer))).rejects.toThrow(/RESERVATION_EXPIRED/);
+    await redeemReservation(db, resB, await booking(buyer));
+    expect((await getGiftBalance(db, c.id))?.balanceAedMinor).toBe(0);
+  });
+
+  it("a late redeem of a lapsed reservation succeeds if the value is still free", async () => {
+    const buyer = await person("b@example.com");
+    const c = await activeCard(buyer, 50000);
+    const resA = await reserveGiftCard(db, c.code, 30000, await pending(), FUTURE());
+    await db.query("update gift_card_reservations set expires_at = now() - interval '1 minute' where id = $1", [resA]);
+    await redeemReservation(db, resA, await booking(buyer));
+    expect((await getGiftBalance(db, c.id))?.balanceAedMinor).toBe(20000);
+  });
+
+  it("refuses an initial value below AED 100", async () => {
+    const buyer = await person("b@example.com");
+    await expect(
+      issueGiftCards(db, { count: 1, initialAedMinor: 9999, buyerPersonId: buyer, deliverOn: "2026-10-08", paymentRef: "pi_x" }),
+    ).rejects.toThrow();
+  });
+
+  it("caps returns at the amount redeemed on that booking", async () => {
+    const buyer = await person("b@example.com");
+    const c = await activeCard(buyer);
+    const bk = await booking(buyer);
+    await redeemReservation(db, await reserveGiftCard(db, c.code, 30000, await pending(), FUTURE()), bk);
+    await returnToGiftCard(db, c.id, bk, 10000);
+    await returnToGiftCard(db, c.id, bk, 20000); // exactly up to the cap
+    expect((await getGiftBalance(db, c.id))?.balanceAedMinor).toBe(50000);
+    await expect(returnToGiftCard(db, c.id, bk, 1)).rejects.toMatchObject({ code: "GIFT_RETURN_EXCEEDS_REDEEMED" });
+    // a booking that never redeemed anything gets nothing back
+    await expect(returnToGiftCard(db, c.id, await booking(buyer), 100)).rejects.toBeInstanceOf(GiftReturnError);
+    expect((await getGiftBalance(db, c.id))?.balanceAedMinor).toBe(50000);
+  });
+
+  it("refuses returns to expired or void cards without writing", async () => {
+    const buyer = await person("b@example.com");
+    const c = await activeCard(buyer);
+    const bk = await booking(buyer);
+    await redeemReservation(db, await reserveGiftCard(db, c.code, 30000, await pending(), FUTURE()), bk);
+    for (const status of ["expired", "void"]) {
+      await db.query("update gift_cards set status = $2 where id = $1", [c.id, status]);
+      await expect(returnToGiftCard(db, c.id, bk, 100)).rejects.toMatchObject({ code: "GIFT_NOT_RETURNABLE" });
+    }
+    const n = await one<{ n: number }>("select count(*)::int n from gift_card_ledger where reason = 'refund_return'");
+    expect(n.n).toBe(0);
   });
 
   it("the first user stays the recipient", async () => {
@@ -215,7 +275,7 @@ describe("gift card lifecycle", () => {
   it("voidIfUnused also voids a still-pending card", async () => {
     const buyer = await person("b@example.com");
     const [c] = await issueGiftCards(db, {
-      count: 1, initialAedMinor: 1000, buyerPersonId: buyer, deliverOn: "2026-10-08", paymentRef: "pi_p",
+      count: 1, initialAedMinor: 10000, buyerPersonId: buyer, deliverOn: "2026-10-08", paymentRef: "pi_p",
     });
     expect(await voidIfUnused(db, "pi_p")).toBe("voided");
     expect((await getGiftBalance(db, c.id))?.status).toBe("void");
@@ -223,7 +283,7 @@ describe("gift card lifecycle", () => {
 
   it("activation after void does not resurrect the card", async () => {
     const buyer = await person("b@example.com");
-    const c = await activeCard(buyer, 1000, "pi_v");
+    const c = await activeCard(buyer, 10000, "pi_v");
     await voidIfUnused(db, "pi_v");
     await activateGiftCards(db, "pi_v");
     expect((await getGiftBalance(db, c.id))?.status).toBe("void");
@@ -232,7 +292,7 @@ describe("gift card lifecycle", () => {
   it("expireGiftCards zeroes the balance with an expiry ledger row", async () => {
     const buyer = await person("b@example.com");
     const c = await activeCard(buyer);
-    const fresh = await activeCard(buyer, 1000, "pi_2");
+    const fresh = await activeCard(buyer, 10000, "pi_2");
     await db.query("update gift_cards set expires_at = '2027-01-01T00:00:00Z' where id = $1", [c.id]);
     await db.query("update gift_cards set expires_at = '2030-01-01T00:00:00Z' where id = $1", [fresh.id]);
 
@@ -271,9 +331,9 @@ describe("rev 2 row level security", () => {
     const b = await person("b@example.com", uB);
     const other = await person("o@example.com");
 
-    const cardAB = await activeCard(a, 1000, "pi_a"); // A buys
-    const cardBO = await activeCard(b, 1000, "pi_b"); // B buys
-    const cardOO = await activeCard(other, 1000, "pi_o"); // other buys
+    const cardAB = await activeCard(a, 10000, "pi_a"); // A buys
+    const cardBO = await activeCard(b, 10000, "pi_b"); // B buys
+    const cardOO = await activeCard(other, 10000, "pi_o"); // other buys
     await db.query("update gift_cards set recipient_person_id = $1 where id = $2", [a, cardBO.id]); // A receives B's
     void cardAB; void cardOO;
 
@@ -293,6 +353,21 @@ describe("rev 2 row level security", () => {
 
     const aItems = await asUser(uA, async () => (await db.query<{ booking_id: string }>("select booking_id from payment_schedule_items")).rows);
     expect(aItems.map((r) => r.booking_id)).toEqual([bkA]);
+
+    // B is a guest on A's booking: can read the booking but not A's payment schedule
+    const tt = await one<{ id: string }>(
+      `insert into ticket_types (experience_id, key, name, price_minor, capacity)
+       select experience_id, 'ga', 'GA', 100, 5 from bookings where id = $1 returning id`,
+      [bkA],
+    );
+    await db.query(
+      "insert into booking_guests (booking_id, person_id, ticket_type_id) values ($1, $2, $3)",
+      [bkA, b, tt.id],
+    );
+    const bBookings = await asUser(uB, async () => (await db.query("select id from bookings")).rows);
+    expect(bBookings).toHaveLength(1);
+    const bItems = await asUser(uB, async () => (await db.query("select booking_id from payment_schedule_items")).rows);
+    expect(bItems).toEqual([]);
 
     await asUser(uA, async () => {
       for (const t of ["gift_card_ledger", "gift_card_reservations", "pending_bookings", "gift_card_batches"]) {

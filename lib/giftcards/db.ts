@@ -116,7 +116,27 @@ export async function returnToGiftCard(
   bookingId: string,
   aedMinor: number,
 ): Promise<void> {
-  await db.query("select return_to_gift_card($1, $2, $3)", [cardId, bookingId, aedMinor]);
+  try {
+    await db.query("select return_to_gift_card($1, $2, $3)", [cardId, bookingId, aedMinor]);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const m = /GIFT_NOT_RETURNABLE|GIFT_RETURN_EXCEEDS_REDEEMED/.exec(msg);
+    if (m) throw new GiftReturnError(m[0] as GiftReturnErrorCode, msg);
+    throw err;
+  }
+}
+
+export type GiftReturnErrorCode = "GIFT_NOT_RETURNABLE" | "GIFT_RETURN_EXCEEDS_REDEEMED";
+
+/** Thrown by returnToGiftCard. GIFT_NOT_RETURNABLE: card expired or void, issue a credit instead. */
+export class GiftReturnError extends Error {
+  constructor(
+    public readonly code: GiftReturnErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "GiftReturnError";
+  }
 }
 
 /** Refunded purchase: voids all cards of the payment when none has been used. */
