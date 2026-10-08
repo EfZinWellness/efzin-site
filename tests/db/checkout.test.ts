@@ -5,24 +5,36 @@ import { freshDb } from "./harness";
 import { ExperienceSchema, type Experience } from "../../lib/content/schema";
 import { syncContent } from "../../lib/content/sync";
 import { validateBooking, type BookingRequest } from "../../lib/booking/validate";
-import { SoldOutError } from "../../lib/booking/pending";
+import { CodeError, SoldOutError } from "../../lib/booking/pending";
 import { confirmPendingBooking } from "../../lib/booking/confirm";
 import { startCheckout } from "../../lib/stripe/checkout";
 import type { StripeApi } from "../../lib/stripe/client";
+import type { SqlClient } from "../../lib/content/sync";
 import { activateGiftCards, issueGiftCards } from "../../lib/giftcards/db";
-import { issueCredit } from "../../lib/credits/db";
+import { findUsableCredit, issueCredit } from "../../lib/credits/db";
 import { handleCodeCheck, resetCodeThrottleForTests } from "../../lib/booking/codes";
+import { handleCheckout } from "../../lib/booking/checkoutHandler";
 
 /** Records every call; never talks to Stripe. */
 class FakeStripe implements StripeApi {
   sessions: Stripe.Checkout.SessionCreateParams[] = [];
   customersCreated: Stripe.CustomerCreateParams[] = [];
+  expired: string[] = [];
+  /** Set to make the next create / expire call throw. */
+  createError: unknown = null;
+  expireError: unknown = null;
   checkout = {
     sessions: {
       create: async (params: Stripe.Checkout.SessionCreateParams) => {
         this.sessions.push(params);
+        if (this.createError) throw this.createError;
         const id = `cs_test_${this.sessions.length}`;
         return { id, url: `https://checkout.stripe.test/${id}` };
+      },
+      expire: async (id: string) => {
+        if (this.expireError) throw this.expireError;
+        this.expired.push(id);
+        return { id };
       },
     },
   };
@@ -155,13 +167,16 @@ describe("startCheckout", () => {
       ["small", 1],
       ["whole", 2],
     ]);
-    const expiry = NOW.getTime() + 31 * 60_000;
-    expect(new Date(holds.rows[0].expires_at).getTime()).toBe(expiry);
+    const holdExpiry = new Date(holds.rows[0].expires_at).getTime();
+    expect(holdExpiry).toBeGreaterThanOrEqual(NOW.getTime() + 31 * 60_000);
+    expect(holdExpiry).toBeLessThan(NOW.getTime() + 32 * 60_000);
     expect(holds.rows[0].checkout_session_id).toBe("cs_test_1");
 
     const s = stripe.sessions[0];
     expect(s.mode).toBe("payment");
-    expect(s.expires_at).toBe(expiry / 1000);
+    // The session never outlives the holds.
+    expect(s.expires_at).toBe(Math.floor(holdExpiry / 1000));
+    expect(s.adaptive_pricing).toEqual({ enabled: true });
     expect(s.line_items?.[0].price_data?.unit_amount).toBe(28000 * 2 + 15000);
     expect(s.line_items?.[0].price_data?.currency).toBe("aed");
     expect(s.line_items?.[0].price_data?.product_data?.name).toBe("Test Event — Pay in full");
@@ -173,7 +188,7 @@ describe("startCheckout", () => {
     expect(pending.rows[0].hold_ids).toHaveLength(2);
     expect(s.metadata).toEqual({ kind: "booking", pending_booking_id: pending.rows[0].id });
     expect(s.success_url).toBe("https://efzin.test/book/test-event/confirmed?session={CHECKOUT_SESSION_ID}");
-    expect(s.after_expiration?.recovery?.enabled).toBe(true);
+    expect(s.after_expiration).toBeUndefined();
   });
 
   it("SoldOutError creates no Stripe session and no pending row", async () => {
@@ -356,5 +371,156 @@ describe("handleCodeCheck", () => {
     expect(sent).toEqual(["admin_error"]);
     const other = await handleCodeCheck({ code: "EFZG-AAAA-AAAP", slug: "test-event" }, "8.8.8.8", d);
     expect(other.status).toBe(200);
+  });
+});
+
+/** Event booking for one, part paid by an AED 100 gift card, so a reservation exists too. */
+async function eventWithGift(): Promise<BookingRequest> {
+  return valid(EVENT, { lines: [{ ticketKey: "whole", qty: 1 }], giftCode: await giftCard(10000) });
+}
+
+async function heldState() {
+  const h = await db.query<{ released_at: string | null }>("select released_at from holds");
+  const r = await db.query<{ released_at: string | null }>("select released_at from gift_card_reservations");
+  return { holdsReleased: h.rows.every((x) => x.released_at !== null), giftReleased: r.rows[0]?.released_at !== null };
+}
+
+const stripeError = (statusCode?: number) => Object.assign(new Error("stripe failed"), statusCode ? { statusCode } : {});
+
+describe("checkout compensation", () => {
+  it("releases holds and gift value after a definite 4xx from Stripe", async () => {
+    stripe.createError = stripeError(400);
+    await expect(startCheckout(await eventWithGift(), deps(EVENT))).rejects.toThrow("stripe failed");
+    expect(await heldState()).toEqual({ holdsReleased: true, giftReleased: true });
+  });
+
+  it.each([
+    ["a network error", stripeError()],
+    ["a 5xx", stripeError(502)],
+  ])("keeps holds after %s (a session may exist)", async (_label, err) => {
+    stripe.createError = err;
+    await expect(startCheckout(await eventWithGift(), deps(EVENT))).rejects.toThrow("stripe failed");
+    expect(await heldState()).toEqual({ holdsReleased: false, giftReleased: false });
+  });
+
+  function failingAttachDb(): SqlClient {
+    return {
+      query: (sql: string, params?: unknown[]) =>
+        /set checkout_session_id/.test(sql) ? Promise.reject(new Error("db down")) : db.query(sql, params),
+    } as SqlClient;
+  }
+
+  it("expires the session, then releases, when recording the session fails", async () => {
+    await expect(startCheckout(await eventWithGift(), { ...deps(EVENT), db: failingAttachDb() })).rejects.toThrow(
+      "db down",
+    );
+    expect(stripe.expired).toEqual(["cs_test_1"]);
+    expect(await heldState()).toEqual({ holdsReleased: true, giftReleased: true });
+  });
+
+  it("keeps holds when the session cannot be expired", async () => {
+    stripe.expireError = stripeError();
+    await expect(startCheckout(await eventWithGift(), { ...deps(EVENT), db: failingAttachDb() })).rejects.toThrow(
+      "db down",
+    );
+    expect(await heldState()).toEqual({ holdsReleased: false, giftReleased: false });
+  });
+});
+
+describe("credit claims", () => {
+  async function credit(aed = 10000) {
+    const owner = (
+      await db.query<{ id: string }>("insert into people (name, email) values ('C', 'c@example.com') returning id")
+    ).rows[0].id;
+    return issueCredit(db, owner, aed, null, NOW);
+  }
+  const withCredit = (code: string, email: string) =>
+    valid(EVENT, {
+      lines: [{ ticketKey: "whole", qty: 1 }],
+      creditCode: code,
+      booker: { name: "Guest", email, phone: "+971500000000" },
+    });
+
+  it("a second pending booking with the same credit gets CREDIT_INVALID", async () => {
+    const c = await credit();
+    await startCheckout(withCredit(c.code, "a@example.com"), deps(EVENT));
+    const err = await startCheckout(withCredit(c.code, "b@example.com"), deps(EVENT)).catch((e) => e);
+    expect(err).toBeInstanceOf(CodeError);
+    expect((err as CodeError).code).toBe("CREDIT_INVALID");
+    expect(await findUsableCredit(db, c.code, NOW)).toBeNull();
+    expect(await count("pending_bookings")).toBe(1);
+  });
+
+  it("a lapsed claim makes the credit reusable, and the first checkout then confirms without it", async () => {
+    const c = await credit();
+    await startCheckout(withCredit(c.code, "a@example.com"), deps(EVENT));
+    const firstId = (await db.query<{ id: string }>("select id from pending_bookings")).rows[0].id;
+    const later = new Date(NOW.getTime() + 32 * 60_000);
+    expect(await findUsableCredit(db, c.code, later)).not.toBeNull();
+    await startCheckout(withCredit(c.code, "b@example.com"), { ...deps(EVENT), now: later });
+    const claim = await db.query<{ claimed_pending_id: string }>("select claimed_pending_id from credits");
+    expect(claim.rows[0].claimed_pending_id).not.toBe(firstId);
+
+    const bookingId = await confirmPendingBooking(db, firstId, { amountPaidMinor: 18000, presentmentCurrency: "aed" });
+    const b = await db.query<{ credit_applied_aed_minor: number; policy_snapshot: { credit_claim_lost?: boolean } }>(
+      "select credit_applied_aed_minor, policy_snapshot from bookings where id = $1",
+      [bookingId],
+    );
+    expect(b.rows[0].credit_applied_aed_minor).toBe(0);
+    expect(b.rows[0].policy_snapshot.credit_claim_lost).toBe(true);
+    const r = await db.query<{ redeemed_booking_id: string | null }>("select redeemed_booking_id from credits");
+    expect(r.rows[0].redeemed_booking_id).toBeNull();
+  });
+});
+
+describe("minimum first charge", () => {
+  it("uses less gift value so the card charge is at least AED 2", async () => {
+    const r = valid(EVENT, { lines: [{ ticketKey: "whole", qty: 1 }], giftCode: await giftCard(27900) });
+    await startCheckout(r, deps(EVENT));
+    expect(stripe.sessions[0].line_items?.[0].price_data?.unit_amount).toBe(200);
+    const res = await db.query<{ amount_aed_minor: number }>("select amount_aed_minor from gift_card_reservations");
+    expect(res.rows[0].amount_aed_minor).toBe(27800);
+  });
+});
+
+describe("handleCheckout", () => {
+  it("counts wrong codes at checkout towards the code limit", async () => {
+    const sent: string[] = [];
+    const hdeps = {
+      loadExperience: async (slug: string) => (slug === EVENT.slug ? EVENT : null),
+      withDb: <T,>(fn: (d: SqlClient) => Promise<T>) => fn(db),
+      stripe,
+      usdRates: async () => RATES,
+      origin: "https://efzin.test",
+      now: NOW,
+      sendEmail: async (kind: string) => {
+        sent.push(kind);
+      },
+    };
+    const body = (code: string) => ({
+      slug: EVENT.slug,
+      lines: [{ ticketKey: "whole", qty: 1 }],
+      booker: { name: "Layla", email: "layla@email.com", phone: "+971500000000" },
+      guests: [],
+      paymentOption: "full",
+      policyAccepted: true,
+      giftCode: code,
+    });
+    for (let i = 0; i < 10; i++) {
+      const res = await handleCheckout(body(`EFZG-BBBB-BBB${"CDEFGHJKLM"[i]}`), "7.7.7.7", hdeps);
+      expect(res).toEqual({ status: 400, body: { error: "gift_invalid" } });
+    }
+    const eleventh = await handleCheckout(body("EFZG-BBBB-BBBN"), "7.7.7.7", hdeps);
+    expect(eleventh.status).toBe(429);
+    expect(sent).toEqual(["admin_error"]);
+    const check = await handleCodeCheck({ code: "EFZG-BBBB-BBBP", slug: EVENT.slug }, "7.7.7.7", {
+      db,
+      usdRates: RATES,
+      now: NOW,
+      sendEmail: hdeps.sendEmail,
+      experience: EVENT,
+    });
+    expect(check.status).toBe(429);
+    expect(stripe.sessions).toHaveLength(0);
   });
 });

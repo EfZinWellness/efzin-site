@@ -129,6 +129,9 @@ export type Credit = {
   expires_at: string;
   redeemed_booking_id: string | null;
   created_at: string;
+  /** Pending checkout holding this credit until claim_expires_at (0008). */
+  claimed_pending_id: string | null;
+  claim_expires_at: string | null;
 };
 
 export type WaitlistEntry = {

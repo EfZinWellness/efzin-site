@@ -11,9 +11,16 @@ export async function readCappedBody(req: Request): Promise<Response | { text: s
   return { text };
 }
 
-/** Throttles by IP and reads the body with a size cap. Returns a Response to send, or the raw body text. */
-export async function guardPost(req: Request, bucket: string): Promise<Response | { text: string }> {
-  if (!allowRequest(`${bucket}:${clientIp(req)}`)) {
+/**
+ * Throttles by IP (default: 5 per 10 minutes, or the given limiter) and reads the body with a
+ * size cap. Returns a Response to send, or the raw body text.
+ */
+export async function guardPost(
+  req: Request,
+  bucket: string,
+  allow: (key: string) => boolean = allowRequest,
+): Promise<Response | { text: string }> {
+  if (!allow(`${bucket}:${clientIp(req)}`)) {
     return Response.json({ ok: false, error: "Too many requests. Please try again later." }, { status: 429 });
   }
   return readCappedBody(req);

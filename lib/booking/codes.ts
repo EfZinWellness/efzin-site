@@ -44,27 +44,43 @@ async function lookup(db: SqlClient, code: string, now: Date): Promise<{ kind: "
   return null;
 }
 
+export const TOO_MANY = "Too many attempts. Please try again later.";
+type SendFn = CodeCheckDeps["sendEmail"];
+
+/**
+ * Shared by /api/codes/check and /api/checkout: true when this IP has made 10 wrong code
+ * attempts in the last hour. Tanya is emailed the first time per IP per hour.
+ */
+export async function wrongCodeBlocked(ip: string, now: Date, sendEmail: SendFn): Promise<boolean> {
+  const t = now.getTime();
+  if (!wrongAttempts.blocked(ip, t)) return false;
+  if (!alerts.blocked(ip, t)) {
+    alerts.record(ip, t);
+    console.warn(`code check: too many wrong codes from ${ip}`);
+    try {
+      await sendEmail("admin_error", adminAddress(), {
+        problem: "Repeated wrong gift card / credit codes (possible guessing). Further attempts are blocked for an hour.",
+        ip,
+      });
+    } catch (err) {
+      console.error("admin_error email failed", err);
+    }
+  }
+  return true;
+}
+
+export function recordWrongCode(ip: string, now: Date): void {
+  wrongAttempts.record(ip, now.getTime());
+}
+
 /** POST /api/codes/check. Wrong codes count towards a per-IP limit; the 11th attempt in an hour gets 429. */
 export async function handleCodeCheck(
   body: unknown,
   ip: string,
   deps: CodeCheckDeps,
 ): Promise<{ status: number; body: CodeCheckBody }> {
-  const t = deps.now.getTime();
-  if (wrongAttempts.blocked(ip, t)) {
-    if (!alerts.blocked(ip, t)) {
-      alerts.record(ip, t);
-      console.warn(`code check: too many wrong codes from ${ip}`);
-      try {
-        await deps.sendEmail("admin_error", adminAddress(), {
-          problem: "Repeated wrong gift card / credit codes (possible guessing). Further attempts are blocked for an hour.",
-          ip,
-        });
-      } catch (err) {
-        console.error("admin_error email failed", err);
-      }
-    }
-    return { status: 429, body: { valid: false, error: "Too many attempts. Please try again later." } };
+  if (await wrongCodeBlocked(ip, deps.now, deps.sendEmail)) {
+    return { status: 429, body: { valid: false, error: TOO_MANY } };
   }
 
   const parsed = BodySchema.safeParse(body);
@@ -72,7 +88,7 @@ export async function handleCodeCheck(
 
   const found = await lookup(deps.db, normaliseCode(parsed.data.code), deps.now);
   if (!found) {
-    wrongAttempts.record(ip, t);
+    recordWrongCode(ip, deps.now);
     return { status: 200, body: { valid: false } };
   }
   const availableBase = convertMinor(found.aed, "AED", deps.experience.baseCurrency, { ...deps.usdRates, USD: 1 }, "floor");

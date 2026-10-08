@@ -11,6 +11,11 @@ export interface StripeApi {
         params: Stripe.Checkout.SessionCreateParams,
         options?: Stripe.RequestOptions,
       ): Promise<{ id: string; url: string | null }>;
+      expire(
+        id: string,
+        params?: Stripe.Checkout.SessionExpireParams,
+        options?: Stripe.RequestOptions,
+      ): Promise<{ id: string }>;
     };
   };
   customers: {

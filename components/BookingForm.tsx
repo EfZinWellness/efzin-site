@@ -115,8 +115,8 @@ export default function BookingForm({ experience: e, nowIso, policy }: { experie
   if (outcome.kind === "confirmed") {
     return (
       <div role="status" className="mt-10 border border-sand/70 p-6 text-center">
-        <p className="font-serif text-2xl">You&rsquo;re in{booker.name ? `, ${booker.name.split(" ")[0]}` : ""}.</p>
-        <p className="mt-3 text-sm text-navy/80">Your gift card or credit covered everything. We&rsquo;ve emailed your confirmation.</p>
+        <p className="font-serif text-2xl">You&rsquo;re booked in.</p>
+        <p className="mt-3 text-sm text-navy/80">Your confirmation will arrive by email shortly.</p>
       </div>
     );
   }

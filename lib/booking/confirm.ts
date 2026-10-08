@@ -2,7 +2,7 @@ import type { SqlClient } from "../content/sync";
 import { redeemCredit } from "../credits/db";
 import { redeemReservation } from "../giftcards/db";
 import { upsertPersonByEmail } from "../people/upsert";
-import type { PendingPayload } from "./pending";
+import { releaseCreditClaim, type PendingPayload } from "./pending";
 
 export interface ConfirmedPayment {
   amountPaidMinor: number;
@@ -40,7 +40,21 @@ export async function confirmPendingBooking(
     const p = typeof row.payload === "string" ? (JSON.parse(row.payload) as PendingPayload) : row.payload;
     const items = [...p.allocation.schedule].sort((a, b) => a.seq - b.seq);
     const unpaidLater = items.some((i) => i.seq > 0 && i.amountMinor > 0);
-    const paidBase = items[0].amountMinor + p.allocation.giftUsedBaseMinor + p.allocation.creditUsedBaseMinor;
+    // The credit is spent only if this checkout still holds its claim (it may have lapsed and been
+    // claimed or redeemed by someone else). If not, the booking is still confirmed and flagged.
+    let creditOk = false;
+    if (p.credit) {
+      const c = await db.query<{ ok: boolean }>(
+        `select (claimed_pending_id = $2 and redeemed_booking_id is null and expires_at > now()
+                 and amount_aed_minor >= $3) as ok
+           from credits where id = $1 for update`,
+        [p.credit.id, pendingId, p.credit.usedAedMinor],
+      );
+      creditOk = c.rows[0]?.ok === true;
+    }
+    const creditLost = p.credit !== null && !creditOk;
+    const paidBase =
+      items[0].amountMinor + p.allocation.giftUsedBaseMinor + (creditOk ? p.allocation.creditUsedBaseMinor : 0);
 
     const b = await db.query<{ id: string }>(
       `insert into bookings
@@ -65,12 +79,13 @@ export async function confirmPendingBooking(
           option: p.option,
           schedule: items,
           scheduleConsent: p.scheduleConsentAt ? SCHEDULE_CONSENT_TEXT : null,
+          ...(creditLost ? { credit_claim_lost: true } : {}),
         }),
         p.option,
         p.totalMinor,
         p.gift?.cardId ?? null,
         p.gift?.reservedAedMinor ?? 0,
-        p.credit?.usedAedMinor ?? 0,
+        creditOk ? p.credit!.usedAedMinor : 0,
         p.scheduleConsentAt,
       ],
     );
@@ -99,13 +114,14 @@ export async function confirmPendingBooking(
     }
 
     if (p.gift) await redeemReservation(db, p.gift.reservationId, bookingId);
-    if (p.credit) await redeemCredit(db, p.credit.id, bookingId, p.credit.usedAedMinor, new Date());
+    if (creditOk) await redeemCredit(db, p.credit!.id, bookingId, p.credit!.usedAedMinor, new Date());
 
     await db.query(
       `update holds set released_at = now()
         where released_at is null and id in (select unnest(hold_ids) from pending_bookings where id = $1)`,
       [pendingId],
     );
+    await releaseCreditClaim(db, pendingId);
     await db.query("update pending_bookings set confirmed_booking_id = $2 where id = $1", [pendingId, bookingId]);
     await db.query("commit");
     return bookingId;

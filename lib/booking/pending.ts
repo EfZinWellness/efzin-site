@@ -1,31 +1,24 @@
 import type { SqlClient } from "../content/sync";
 import type { Experience } from "../content/schema";
-import { findUsableCredit } from "../credits/db";
-import { getGiftBalance, releaseReservation, reserveGiftCard } from "../giftcards/db";
-import { allocateDiscounts, type Allocation } from "../payments/allocate";
+import { releaseReservation } from "../giftcards/db";
+import type { Allocation } from "../payments/allocate";
 import type { PaymentOption, ScheduleItem } from "../payments/schedule";
 import { policyCopy } from "../policy/copy";
 import { convertMinor } from "../pricing/convert";
 import { upsertPersonByEmail } from "../people/upsert";
+import { checkGift, claimCredit, lockCredit, planDiscounts, reserveGift } from "./discounts";
 import { bookingTotal, scheduleFor } from "./quote";
 import type { BookingRequest } from "./validate";
 
-/** Spots and gift value are held for the Checkout session's lifetime: creation + 31 minutes. */
+export { CodeError, type CodeErrorCode } from "./discounts";
+
+/** Spots, gift value and credit claims are held for the Checkout session's lifetime: + 31 minutes. */
 export const HOLD_MINUTES = 31;
 
 export class SoldOutError extends Error {
   constructor(public readonly ticketKey: string) {
     super(`SOLD_OUT: ${ticketKey}`);
     this.name = "SoldOutError";
-  }
-}
-
-export type CodeErrorCode = "GIFT_INVALID" | "GIFT_EXPIRED" | "GIFT_INSUFFICIENT" | "CREDIT_INVALID";
-
-export class CodeError extends Error {
-  constructor(public readonly code: CodeErrorCode) {
-    super(code);
-    this.name = "CodeError";
   }
 }
 
@@ -46,6 +39,7 @@ export interface PendingPayload {
   /** After gift then credit; `allocation.schedule` is what is charged. */
   allocation: Allocation;
   gift: { code: string; cardId: string; reservationId: string; reservedAedMinor: number } | null;
+  /** The credit row is claimed (credits.claimed_pending_id) by this pending booking. */
   credit: { id: string; code: string; usedAedMinor: number } | null;
   policy: { template: string; copy: string[] };
   scheduleConsentAt: string | null;
@@ -54,35 +48,11 @@ export interface PendingPayload {
 
 const withUsd = (r: Record<string, number>) => ({ ...r, USD: 1 });
 
-async function reserveGift(
-  db: SqlClient,
-  code: string,
-  neededAed: number,
-  pendingId: string,
-  expiresAt: Date,
-  now: Date,
-): Promise<NonNullable<PendingPayload["gift"]>> {
-  const bal = await getGiftBalance(db, code);
-  if (!bal || (bal.status !== "active" && bal.status !== "expired")) throw new CodeError("GIFT_INVALID");
-  if (bal.status === "expired" || (bal.expiresAt && Date.parse(bal.expiresAt) <= now.getTime())) {
-    throw new CodeError("GIFT_EXPIRED");
-  }
-  const amount = Math.min(bal.availableAedMinor, neededAed);
-  if (amount < 1) throw new CodeError("GIFT_INSUFFICIENT");
-  try {
-    const reservationId = await reserveGiftCard(db, bal.code, amount, pendingId, expiresAt);
-    return { code: bal.code, cardId: bal.id, reservationId, reservedAedMinor: amount };
-  } catch (err) {
-    const m = /GIFT_INVALID|GIFT_EXPIRED|GIFT_INSUFFICIENT/.exec(err instanceof Error ? err.message : String(err));
-    if (m) throw new CodeError(m[0] as CodeErrorCode);
-    throw err;
-  }
-}
-
 /**
- * In one transaction: upserts the booker, holds every ticket line, reserves the gift card,
- * checks the credit, allocates discounts and stores the pending booking. Throws SoldOutError
- * or CodeError (nothing is left behind). The caller then starts Stripe Checkout.
+ * In one transaction: upserts the booker, holds every ticket line (in ticket_type_id order,
+ * so concurrent checkouts lock rows in the same order), plans gift/credit use, reserves the
+ * gift card, claims the credit and stores the pending booking. Throws SoldOutError or
+ * CodeError, leaving nothing behind. The caller then starts Stripe Checkout.
  */
 export async function createPendingBooking(
   db: SqlClient,
@@ -121,7 +91,7 @@ export async function createPendingBooking(
     const id = pending.rows[0].id;
 
     const holdIds: string[] = [];
-    for (const l of lines) {
+    for (const l of [...lines].sort((a, b) => (a.ticketTypeId < b.ticketTypeId ? -1 : 1))) {
       try {
         const h = await db.query<{ id: string }>("select create_hold($1, $2, $3) as id", [
           l.ticketTypeId,
@@ -138,35 +108,30 @@ export async function createPendingBooking(
     const base = exp.baseCurrency;
     const totalMinor = bookingTotal(exp, req.lines);
     const schedule = scheduleFor(exp, totalMinor, req.paymentOption, now);
+    const giftCard = req.giftCode ? await checkGift(db, req.giftCode, now) : null;
+    const creditRow = req.creditCode ? await lockCredit(db, req.creditCode, now) : null;
+    const plan = planDiscounts({
+      schedule,
+      totalMinor,
+      base,
+      rates,
+      giftAvailableAed: giftCard?.availableAed ?? 0,
+      creditAvailableAed: creditRow?.availableAed ?? 0,
+    });
 
     let gift: PendingPayload["gift"] = null;
-    let giftBase = 0;
-    if (req.giftCode) {
-      const neededAed = convertMinor(totalMinor, base, "AED", rates, "ceil");
-      gift = await reserveGift(db, req.giftCode, neededAed, id, expiresAt, now);
-      giftBase = convertMinor(gift.reservedAedMinor, "AED", base, rates, "floor");
+    if (giftCard && plan.giftAed > 0) {
+      const reservationId = await reserveGift(db, giftCard.code, plan.giftAed, id, expiresAt);
+      gift = { code: giftCard.code, cardId: giftCard.cardId, reservationId, reservedAedMinor: plan.giftAed };
     }
-
     let credit: PendingPayload["credit"] = null;
-    let creditBase = 0;
-    if (req.creditCode) {
-      const c = await findUsableCredit(db, req.creditCode, now);
-      if (!c) throw new CodeError("CREDIT_INVALID");
-      const remainingAed = convertMinor(Math.max(0, totalMinor - giftBase), base, "AED", rates, "ceil");
-      const usedAed = Math.min(c.amount_aed_minor, remainingAed);
-      if (usedAed > 0) {
-        credit = { id: c.id, code: c.code, usedAedMinor: usedAed };
-        creditBase = convertMinor(usedAed, "AED", base, rates, "floor");
-      }
+    if (creditRow && plan.creditAed > 0) {
+      await claimCredit(db, creditRow.id, id, expiresAt);
+      credit = { id: creditRow.id, code: creditRow.code, usedAedMinor: plan.creditAed };
     }
 
-    const allocation = allocateDiscounts({
-      schedule,
-      giftAvailableBaseMinor: giftBase,
-      creditAvailableBaseMinor: creditBase,
-    });
+    const { allocation } = plan;
     const paidNowBase = allocation.schedule[0].amountMinor + allocation.giftUsedBaseMinor + allocation.creditUsedBaseMinor;
-
     const payload: PendingPayload = {
       slug: exp.slug,
       experienceId: tt.rows[0].experience_id,
@@ -203,25 +168,52 @@ export async function createPendingBooking(
   }
 }
 
-/** Records the Checkout session on the pending booking and its holds. */
-export async function attachCheckoutSession(db: SqlClient, pendingId: string, sessionId: string): Promise<void> {
-  await db.query("update pending_bookings set checkout_session_id = $2 where id = $1", [pendingId, sessionId]);
+const HOLDS_OF = "select unnest(hold_ids) from pending_bookings where id = $1";
+
+/**
+ * Moves the expiry of the holds, gift reservations and credit claim of a pending booking to
+ * `expiresAt` (only ever later), so they never lapse before the Checkout session does.
+ */
+export async function extendPendingExpiry(db: SqlClient, pendingId: string, expiresAt: Date): Promise<void> {
+  const at = expiresAt.toISOString();
   await db.query(
-    "update holds set checkout_session_id = $2 where id in (select unnest(hold_ids) from pending_bookings where id = $1)",
-    [pendingId, sessionId],
+    `update holds set expires_at = greatest(expires_at, $2) where released_at is null and id in (${HOLDS_OF})`,
+    [pendingId, at],
+  );
+  await db.query(
+    `update gift_card_reservations set expires_at = greatest(expires_at, $2)
+      where pending_booking_id = $1 and released_at is null`,
+    [pendingId, at],
+  );
+  await db.query(
+    "update credits set claim_expires_at = greatest(claim_expires_at, $2) where claimed_pending_id = $1",
+    [pendingId, at],
+  );
+  await db.query(
+    "update pending_bookings set payload = jsonb_set(payload, '{expiresAt}', to_jsonb($2::text)) where id = $1",
+    [pendingId, at],
   );
 }
 
-/** Frees the spots and gift value of a checkout that never completed. */
+/** Records the Checkout session on the pending booking and its holds. */
+export async function attachCheckoutSession(db: SqlClient, pendingId: string, sessionId: string): Promise<void> {
+  await db.query("update pending_bookings set checkout_session_id = $2 where id = $1", [pendingId, sessionId]);
+  await db.query(`update holds set checkout_session_id = $2 where id in (${HOLDS_OF})`, [pendingId, sessionId]);
+}
+
+/** Frees the spots, gift value and credit claim of a checkout that never completed. */
 export async function releasePending(db: SqlClient, pendingId: string): Promise<void> {
-  await db.query(
-    `update holds set released_at = now()
-      where released_at is null and id in (select unnest(hold_ids) from pending_bookings where id = $1)`,
-    [pendingId],
-  );
+  await db.query(`update holds set released_at = now() where released_at is null and id in (${HOLDS_OF})`, [pendingId]);
   const r = await db.query<{ id: string }>(
     "select id from gift_card_reservations where pending_booking_id = $1 and released_at is null",
     [pendingId],
   );
   for (const row of r.rows) await releaseReservation(db, row.id);
+  await releaseCreditClaim(db, pendingId);
+}
+
+export async function releaseCreditClaim(db: SqlClient, pendingId: string): Promise<void> {
+  await db.query("update credits set claimed_pending_id = null, claim_expires_at = null where claimed_pending_id = $1", [
+    pendingId,
+  ]);
 }

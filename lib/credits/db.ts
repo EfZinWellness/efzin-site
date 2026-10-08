@@ -42,12 +42,13 @@ export async function issueCredit(
   throw new Error("CREDIT_CODE_COLLISION");
 }
 
-/** A credit that exists, is unredeemed and has not expired. */
+/** A credit that exists, is unredeemed, has not expired and is not claimed by a live checkout. */
 export async function findUsableCredit(db: SqlClient, code: string, now: Date): Promise<CreditRow | null> {
   const r = await db.query<CreditRow>(
     `select id, code, person_id, amount_aed_minor, source_booking_id, expires_at
        from credits
-      where code = $1 and redeemed_booking_id is null and expires_at > $2`,
+      where code = $1 and redeemed_booking_id is null and expires_at > $2
+        and (claimed_pending_id is null or claim_expires_at is null or claim_expires_at <= $2)`,
     [normaliseCode(code), now.toISOString()],
   );
   return r.rows[0] ?? null;
