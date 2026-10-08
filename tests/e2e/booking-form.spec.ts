@@ -54,6 +54,12 @@ test("adding a ticket asks for a guest's details", async ({ page }) => {
   await expect(page.getByLabel("Guest 2 name")).toBeVisible();
 });
 
+test("returning from a cancelled checkout says nothing was charged and keeps the form", async ({ page }) => {
+  await page.goto(`${RETREAT}?cancelled=00000000-0000-0000-0000-000000000000`);
+  await expect(page.getByText("Checkout cancelled. Nothing was charged")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Continue to payment/ })).toBeVisible();
+});
+
 test("an experience that is not on sale shows Not currently available", async ({ page }) => {
   await page.goto("/book/reform-athletica-retreat");
   await expect(page.getByText("Not currently available")).toBeVisible();

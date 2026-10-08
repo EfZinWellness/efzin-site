@@ -1,3 +1,4 @@
+import { getAuthAdmin } from "@/lib/auth/provision";
 import { handleCheckout } from "@/lib/booking/checkoutHandler";
 import { loadExperience } from "@/lib/content/load";
 import { withDbClient } from "@/lib/db/client";
@@ -32,6 +33,7 @@ export async function POST(req: Request) {
     origin: process.env.NEXT_PUBLIC_SITE_ORIGIN || new URL(req.url).origin,
     now: new Date(),
     sendEmail,
+    auth: getAuthAdmin(),
   });
   return Response.json(res.body, { status: res.status });
 }

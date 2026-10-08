@@ -10,7 +10,12 @@ export type EmailKind =
   | "credit_expiring"
   | "admin_new_booking"
   | "request_received"
-  | "admin_error";
+  | "admin_error"
+  | "scheduled_payment_receipt"
+  | "scheduled_payment_failed"
+  | "admin_payment_failed";
+
+export type SendEmailFn = (kind: EmailKind, to: string, data: Record<string, unknown>) => Promise<void>;
 
 export interface OutgoingEmail {
   from: string;
@@ -23,7 +28,7 @@ export interface OutgoingEmail {
 export type EmailTransport = (msg: OutgoingEmail) => Promise<void>;
 
 const FROM = "Ef Zin <hello@efzinwellness.com>";
-const ADMIN_KINDS = new Set<EmailKind>(["admin_new_booking", "request_received", "admin_error"]);
+const ADMIN_KINDS = new Set<EmailKind>(["admin_new_booking", "request_received", "admin_error", "admin_payment_failed"]);
 
 let override: EmailTransport | null = null;
 
@@ -65,4 +70,20 @@ export async function sendEmail(kind: EmailKind, to: string, data: Record<string
   const recipients = ADMIN_KINDS.has(kind) && admins.length > 0 ? admins : [to];
   const msg: OutgoingEmail = { from: FROM, to: recipients, ...render(kind, data) };
   await (override ?? defaultTransport)(msg);
+}
+
+/** Sends through `send` without throwing (failures are logged): for emails after a committed change. */
+export async function sendQuietly(
+  send: SendEmailFn,
+  kind: EmailKind,
+  to: string,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    await send(kind, to, data);
+    return true;
+  } catch (err) {
+    console.error(`[email] ${kind} to ${to} failed`, err);
+    return false;
+  }
 }

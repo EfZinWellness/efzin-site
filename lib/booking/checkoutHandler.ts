@@ -1,3 +1,4 @@
+import type { AuthAdmin } from "../auth/provision";
 import type { SqlClient } from "../content/sync";
 import type { Experience } from "../content/schema";
 import type { EmailKind } from "../email/send";
@@ -17,6 +18,8 @@ export interface CheckoutHandlerDeps {
   origin: string;
   now: Date;
   sendEmail: (kind: EmailKind, to: string, data: Record<string, unknown>) => Promise<void>;
+  /** Member provisioning for bookings confirmed without Stripe; null/absent skips it. */
+  auth?: AuthAdmin | null;
 }
 
 type Body = CheckoutResult | { error: string; errors?: string[]; message?: string };
@@ -45,7 +48,15 @@ export async function handleCheckout(
   try {
     const usdRates = await deps.usdRates();
     const result = await deps.withDb((db) =>
-      startCheckout(v.value, { db, stripe, now: deps.now, usdRates, origin: deps.origin, experience }),
+      startCheckout(v.value, {
+        db,
+        stripe,
+        now: deps.now,
+        usdRates,
+        origin: deps.origin,
+        experience,
+        effects: { sendEmail: deps.sendEmail, auth: deps.auth ?? null, origin: deps.origin },
+      }),
     );
     return result === null ? { status: 503, body: UNAVAILABLE } : { status: 200, body: result };
   } catch (err) {

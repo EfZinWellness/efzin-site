@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
-import type Stripe from "stripe";
 import { freshDb } from "./harness";
 import { ExperienceSchema, type Experience } from "../../lib/content/schema";
 import { syncContent } from "../../lib/content/sync";
@@ -8,43 +7,12 @@ import { validateBooking, type BookingRequest } from "../../lib/booking/validate
 import { CodeError, SoldOutError } from "../../lib/booking/pending";
 import { confirmPendingBooking } from "../../lib/booking/confirm";
 import { startCheckout } from "../../lib/stripe/checkout";
-import type { StripeApi } from "../../lib/stripe/client";
 import type { SqlClient } from "../../lib/content/sync";
 import { activateGiftCards, issueGiftCards } from "../../lib/giftcards/db";
 import { findUsableCredit, issueCredit } from "../../lib/credits/db";
 import { handleCodeCheck, resetCodeThrottleForTests } from "../../lib/booking/codes";
 import { handleCheckout } from "../../lib/booking/checkoutHandler";
-
-/** Records every call; never talks to Stripe. */
-class FakeStripe implements StripeApi {
-  sessions: Stripe.Checkout.SessionCreateParams[] = [];
-  customersCreated: Stripe.CustomerCreateParams[] = [];
-  expired: string[] = [];
-  /** Set to make the next create / expire call throw. */
-  createError: unknown = null;
-  expireError: unknown = null;
-  checkout = {
-    sessions: {
-      create: async (params: Stripe.Checkout.SessionCreateParams) => {
-        this.sessions.push(params);
-        if (this.createError) throw this.createError;
-        const id = `cs_test_${this.sessions.length}`;
-        return { id, url: `https://checkout.stripe.test/${id}` };
-      },
-      expire: async (id: string) => {
-        if (this.expireError) throw this.expireError;
-        this.expired.push(id);
-        return { id };
-      },
-    },
-  };
-  customers = {
-    create: async (params: Stripe.CustomerCreateParams) => {
-      this.customersCreated.push(params);
-      return { id: `cus_test_${this.customersCreated.length}` };
-    },
-  };
-}
+import { FakeStripe } from "./fakeStripe";
 
 const NOW = new Date("2027-01-10T09:00:00Z");
 const RATES = { EUR: 0.92, USD: 1 };
@@ -188,6 +156,7 @@ describe("startCheckout", () => {
     expect(pending.rows[0].hold_ids).toHaveLength(2);
     expect(s.metadata).toEqual({ kind: "booking", pending_booking_id: pending.rows[0].id });
     expect(s.success_url).toBe("https://efzin.test/book/test-event/confirmed?session={CHECKOUT_SESSION_ID}");
+    expect(s.cancel_url).toBe(`https://efzin.test/book/test-event?cancelled=${pending.rows[0].id}`);
     expect(s.after_expiration).toBeUndefined();
   });
 

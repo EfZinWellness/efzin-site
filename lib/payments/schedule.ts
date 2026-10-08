@@ -21,7 +21,7 @@ export interface ScheduleInput {
 }
 
 /** Calendar date (YYYY-MM-DD) of an instant in the given timezone. */
-function calendarDate(at: Date, timezone: string): string {
+export function calendarDate(at: Date, timezone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",

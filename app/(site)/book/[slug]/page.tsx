@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import BookingForm from "@/components/BookingForm";
+import CancelledCheckout from "@/components/CancelledCheckout";
 import { effectiveStatus, loadExperience } from "@/lib/content/load";
 import { detailHref, formatRange, formatWhen } from "@/lib/format";
 import { policyCopy } from "@/lib/policy/copy";
+import { releaseCancelled } from "./actions";
 
 async function load(slug: string) {
   const e = await loadExperience(slug);
@@ -16,8 +18,10 @@ export async function generateMetadata({ params }: PageProps<"/book/[slug]">) {
   return { title: `Book ${e.title} | Ef Zin`, robots: { index: false } };
 }
 
-export default async function BookPage({ params }: PageProps<"/book/[slug]">) {
+export default async function BookPage({ params, searchParams }: PageProps<"/book/[slug]">) {
   const e = await load((await params).slug);
+  const cancelled = (await searchParams).cancelled;
+  const cancelledId = typeof cancelled === "string" ? cancelled : null;
   const now = new Date();
   const when = `${e.type === "retreat" ? formatRange(e) : formatWhen(e)} · ${e.venue.name}`;
 
@@ -37,6 +41,7 @@ export default async function BookPage({ params }: PageProps<"/book/[slug]">) {
     <div className="mx-auto max-w-md px-4 pb-20 pt-10">
       <h1 className="font-serif text-3xl leading-tight">{e.title}</h1>
       <p className="eyebrow mt-2 text-navy/70">{when}</p>
+      {cancelledId && <CancelledCheckout pendingId={cancelledId} release={releaseCancelled} />}
       <BookingForm
         experience={{
           slug: e.slug,

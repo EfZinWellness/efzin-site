@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import type { SqlClient } from "../content/sync";
 import type { Experience } from "../content/schema";
+import type { ConfirmEffects } from "../booking/afterConfirm";
 import { confirmPendingBooking } from "../booking/confirm";
 import {
   HOLD_MINUTES,
@@ -23,6 +24,8 @@ export interface CheckoutDeps {
   origin: string;
   /** The (validated) experience being booked. */
   experience: Experience;
+  /** Accounts and emails for a booking confirmed here (fully covered by gift/credit). */
+  effects?: ConfirmEffects;
 }
 
 export type CheckoutResult = { kind: "redirect"; url: string } | { kind: "confirmed"; bookingId: string };
@@ -60,7 +63,7 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
   let params: Stripe.Checkout.SessionCreateParams;
   try {
     if (firstAmount === 0 && laterAmount === 0) {
-      return { kind: "confirmed", bookingId: await confirmPendingBooking(db, id, null) };
+      return { kind: "confirmed", bookingId: await confirmPendingBooking(db, id, null, deps.effects) };
     }
     const savesCard = payload.option !== "full" || firstAmount === 0;
     const customer = savesCard ? await ensureStripeCustomer(db, stripe, payload.booker.personId) : undefined;
@@ -75,7 +78,8 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
       expires_at: Math.floor(expiresAt.getTime() / 1000),
       metadata,
       success_url: `${deps.origin}/book/${payload.slug}/confirmed?session={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${deps.origin}/book/${payload.slug}`,
+      // The book page releases this pending booking on return, so the guest can retry at once.
+      cancel_url: `${deps.origin}/book/${payload.slug}?cancelled=${id}`,
     };
     params =
       firstAmount === 0
