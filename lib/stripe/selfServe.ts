@@ -10,8 +10,8 @@ export interface SelfServeDeps {
   now?: Date;
 }
 
-/** Stripe's minimum session lifetime is 30 minutes; a little margin keeps the request valid in transit. */
-export const PAY_REST_TTL_SECONDS = 30 * 60 + 30;
+/** Pay-rest sessions are bucketed into 30-minute windows (see startPayRest). */
+export const PAY_REST_WINDOW_SECONDS = 30 * 60;
 
 /** not_found: no such booking for this booker. not_payable: not on an open plan. nothing_due: no unpaid items. */
 export type SelfServeErrorCode = "not_found" | "not_payable" | "nothing_due";
@@ -64,9 +64,12 @@ export async function startPayRest(deps: SelfServeDeps, bookingId: string, perso
   };
   const back = `${deps.origin}/account/bookings/${bookingId}`;
   const nowMs = deps.now?.getTime() ?? Date.now();
-  // Short-lived, so a stale session cannot be paid long after the schedule has moved on.
-  const expiresAt = Math.floor(nowMs / 1000) + PAY_REST_TTL_SECONDS;
-  const window = Math.floor(nowMs / (PAY_REST_TTL_SECONDS * 1000));
+  // Short-lived, so a stale session cannot be paid long after the schedule has moved on. Both the
+  // expiry and the idempotency key come from the 30-minute window, so every request in the window
+  // sends identical params (Stripe rejects a reused key with different params) and gets the same
+  // session, which expires 30–60 minutes from now (Stripe's minimum is 30).
+  const window = Math.floor(nowMs / 1000 / PAY_REST_WINDOW_SECONDS);
+  const expiresAt = (window + 2) * PAY_REST_WINDOW_SECONDS;
   const session = await stripe.checkout.sessions.create(
     {
       mode: "payment",
@@ -84,8 +87,7 @@ export async function startPayRest(deps: SelfServeDeps, bookingId: string, perso
       success_url: `${back}?paid=1`,
       cancel_url: back,
     },
-    // A double click within the same window returns the same session (the key changes every window,
-    // so a later visit never gets back an expired session).
+    // Same window, same key: a repeat click returns the same session. A new window gets a new one.
     { idempotencyKey: `efzin-payrest-${bookingId}-${itemIds.join(".")}-${total}-${window}` },
   );
   if (!session.url) throw new Error("Stripe returned a Checkout session without a URL");

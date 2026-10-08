@@ -33,13 +33,30 @@ export class FakeStripe implements StripeApi {
   /** Set to make customers.update throw. */
   customerUpdateError: unknown = null;
 
+  /** Idempotency keys seen by checkout.sessions.create: params (JSON) and the response. */
+  idempotency = new Map<string, { params: string; result: { id: string; url: string } }>();
+
   checkout = {
     sessions: {
-      create: async (params: Stripe.Checkout.SessionCreateParams) => {
+      create: async (params: Stripe.Checkout.SessionCreateParams, options?: Stripe.RequestOptions) => {
+        // Like Stripe: a reused key returns the first response, or errors if the params differ.
+        const key = options?.idempotencyKey;
+        const seen = key ? this.idempotency.get(key) : undefined;
+        if (seen) {
+          if (seen.params !== JSON.stringify(params)) {
+            throw Object.assign(new Error("Keys for idempotent requests can only be used with the same parameters"), {
+              type: "StripeIdempotencyError",
+              statusCode: 400,
+            });
+          }
+          return seen.result;
+        }
         this.sessions.push(params);
         if (this.createError) throw this.createError;
         const id = `cs_test_${this.sessions.length}`;
-        return { id, url: `https://checkout.stripe.test/${id}` };
+        const result = { id, url: `https://checkout.stripe.test/${id}` };
+        if (key) this.idempotency.set(key, { params: JSON.stringify(params), result });
+        return result;
       },
       expire: async (id: string) => {
         if (this.expireError) throw this.expireError;
@@ -129,8 +146,16 @@ export class FakeStripe implements StripeApi {
 
   refundsCreated: { params: Stripe.RefundCreateParams; options?: Stripe.RequestOptions }[] = [];
 
+  /** Set to make the next refunds.create throw (once). */
+  refundError: unknown = null;
+
   refunds = {
     create: async (params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions) => {
+      if (this.refundError) {
+        const e = this.refundError;
+        this.refundError = null;
+        throw e;
+      }
       this.refundsCreated.push(options ? { params, options } : { params });
       return { id: `re_test_${this.refundsCreated.length}` };
     },

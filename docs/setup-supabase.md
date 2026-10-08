@@ -13,8 +13,8 @@ Members sign in without a password: an emailed link, or Google. Do these steps o
 
 ## Authentication > Providers
 
-1. **Email**: enabled, with **Confirm email ON**.
-2. **Turn email + password sign-up off.** Members use email links only. An account can be linked to an existing Ef Zin profile by email only when it signed in with an email link or Google (see `lib/auth/resolve.ts`).
+1. **Email**: enabled, with **Confirm email ON**. **This is what makes linking by email safe.** A signed-in account is matched to an existing Ef Zin profile by email only when Supabase has confirmed the address (`email_confirmed_at`) and the provider is `email` or `google` (see `lib/auth/resolve.ts`). Supabase reports the provider `email` for password sign-ups as well as for email links, so the provider check alone cannot tell them apart. The confirmation step is what proves the person owns the address. Never turn "Confirm email" off.
+2. **Avoid password sign-ups.** Members use email links only, and the site never offers a password. If your Supabase dashboard has a separate toggle for email + password sign-up, turn it off. Some versions have no separate toggle (email links and passwords share the Email provider). In that case, leaving "Confirm email" ON (step 1) is the safeguard.
 3. **Google**: enable it and add the Google OAuth client ID and secret (Google Cloud console). In Google, add the Supabase callback URL that the provider page shows.
 
 ## Authentication > URL configuration

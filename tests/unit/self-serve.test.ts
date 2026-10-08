@@ -60,15 +60,30 @@ describe("startPayRest", () => {
       expected_amount_minor: String(expected),
     });
     expect(s.payment_intent_data?.metadata).toEqual(s.metadata);
-    // Expires after Stripe's 30-minute minimum (plus margin), so a stale session cannot be paid later.
+    // Expires 30–60 minutes ahead, on a window boundary, so a stale session cannot be paid later.
     const ttl = s.expires_at! - Math.floor(Date.now() / 1000);
     expect(ttl).toBeGreaterThanOrEqual(30 * 60);
-    expect(ttl).toBeLessThanOrEqual(31 * 60 + 5);
+    expect(ttl).toBeLessThanOrEqual(60 * 60);
+    expect(s.expires_at! % 1800).toBe(0);
     expect(s.line_items).toHaveLength(1);
     expect(s.line_items![0].price_data!.currency).toBe("eur");
     expect(s.line_items![0].price_data!.unit_amount).toBe(expected);
     expect(s.success_url).toBe(`${ORIGIN}/account/bookings/${bookingId}?paid=1`);
     expect(s.success_url).not.toMatch(/@/);
+  });
+
+  it("a repeat click a few seconds later in the same window returns the same session without an error", async () => {
+    const windowStart = 1_900_000_000 - (1_900_000_000 % 1800);
+    const t1 = new Date((windowStart + 100) * 1000);
+    const t2 = new Date((windowStart + 105) * 1000);
+    const a = await startPayRest({ ...deps(), now: t1 }, bookingId, bookerId);
+    const b = await startPayRest({ ...deps(), now: t2 }, bookingId, bookerId);
+    expect(b.url).toBe(a.url);
+    expect(w.stripe.sessions).toHaveLength(1);
+    expect(w.stripe.sessions[0].expires_at).toBe(windowStart + 2 * 1800);
+    // The next window opens a fresh session.
+    const c = await startPayRest({ ...deps(), now: new Date((windowStart + 1800 + 1) * 1000) }, bookingId, bookerId);
+    expect(c.url).not.toBe(a.url);
   });
 
   it("refuses someone who is not the booker", async () => {
