@@ -52,6 +52,11 @@ export interface StripeApi {
       params?: Stripe.InvoicePayParams,
       options?: Stripe.RequestOptions,
     ): Promise<{ id: string; status: Stripe.Invoice.Status | null }>;
+    sendInvoice(
+      id: string,
+      params?: Stripe.InvoiceSendInvoiceParams,
+      options?: Stripe.RequestOptions,
+    ): Promise<{ id: string }>;
     voidInvoice(id: string): Promise<{ id: string }>;
     list(params: Stripe.InvoiceListParams): Promise<{ data: { id: string }[]; has_more: boolean }>;
     update(id: string, params: Stripe.InvoiceUpdateParams): Promise<{ id: string }>;

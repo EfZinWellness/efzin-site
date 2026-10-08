@@ -9,7 +9,7 @@ import { activateGiftPurchase, giftMetadataValid, onGiftCardsActivated } from ".
 import { adminAddress } from "../requests/handlers";
 import { refId, type StripeApi } from "./client";
 import { processOnce, sequence, type AfterCommit } from "./events";
-import { onInvoiceFailed, onInvoicePaid } from "./invoiceEvents";
+import { onInvoiceFailed, onInvoiceOverdue, onInvoicePaid } from "./invoiceEvents";
 import { completePayRest } from "./payRest";
 import { onChargeRefunded } from "./refunds";
 
@@ -46,6 +46,8 @@ async function dispatch(evt: Stripe.Event, deps: WebhookDeps): Promise<AfterComm
       return onInvoicePaid(evt.data.object, deps);
     case "invoice.payment_failed":
       return onInvoiceFailed(evt.data.object, deps);
+    case "invoice.overdue":
+      return onInvoiceOverdue(evt.data.object, deps);
     case "charge.refunded":
       return onChargeRefunded(evt.data.object, deps);
     default:

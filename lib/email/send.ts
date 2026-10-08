@@ -1,4 +1,7 @@
-import { GIFT_EMAIL_KINDS, renderGiftEmail, type GiftEmailKind } from "./giftEmails";
+import type { SqlClient } from "../content/sync";
+import { getSqlClient } from "../db/client";
+import { claimEmail, releaseEmail } from "./log";
+import { renderEmail } from "./render";
 
 export type EmailKind =
   | "booking_confirmed"
@@ -13,12 +16,16 @@ export type EmailKind =
   | "admin_new_booking"
   | "request_received"
   | "admin_error"
+  | "scheduled_payment_upcoming"
   | "scheduled_payment_receipt"
   | "scheduled_payment_failed"
   | "admin_payment_failed"
   | "gift_card_bought"
   | "gift_card_delivered"
-  | "gift_card_delivered_buyer";
+  | "gift_card_delivered_buyer"
+  | "gift_card_used"
+  | "gift_card_expiring"
+  | "booking_cancelled_unpaid";
 
 export interface EmailAttachment {
   filename: string;
@@ -26,11 +33,22 @@ export interface EmailAttachment {
   contentType: string;
 }
 
+export interface SendOptions {
+  /**
+   * Stable reference (booking id, item id, card id + date…). With a ref, the email is sent at most
+   * once per (kind, to, ref), recorded in email_log. Without one nothing is logged or deduplicated.
+   */
+  ref?: string;
+  /** Database for email_log; defaults to the shared pool. */
+  db?: SqlClient | null;
+}
+
 export type SendEmailFn = (
   kind: EmailKind,
   to: string,
   data: Record<string, unknown>,
   attachments?: EmailAttachment[],
+  opts?: SendOptions,
 ) => Promise<void>;
 
 export interface OutgoingEmail {
@@ -40,6 +58,8 @@ export interface OutgoingEmail {
   text: string;
   html: string;
   attachments?: EmailAttachment[];
+  /** Resend tags; `kind` names the email kind. */
+  tags?: { name: string; value: string }[];
 }
 
 export type EmailTransport = (msg: OutgoingEmail) => Promise<void>;
@@ -54,23 +74,6 @@ export function setEmailTransport(fn: EmailTransport | null): void {
   override = fn;
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-function render(kind: EmailKind, data: Record<string, unknown>): { subject: string; text: string; html: string } {
-  if (GIFT_EMAIL_KINDS.has(kind)) return renderGiftEmail(kind as GiftEmailKind, data);
-  const label = kind.replace(/_/g, " ");
-  const subject =
-    kind === "request_received"
-      ? `New ${String(data.type ?? "").replace(/_/g, " ")} enquiry from ${String(data.name ?? "a guest")}`
-      : `Ef Zin: ${label}`;
-  const lines = Object.entries(data).map(
-    ([k, v]) => `${k}: ${typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)}`,
-  );
-  const text = lines.join("\n");
-  const html = `<p>${lines.map(esc).join("<br>")}</p>`;
-  return { subject, text, html };
-}
-
 async function defaultTransport(msg: OutgoingEmail): Promise<void> {
   const key = process.env.RESEND_API_KEY;
   if (!key) {
@@ -82,22 +85,40 @@ async function defaultTransport(msg: OutgoingEmail): Promise<void> {
   if (error) throw new Error(`Resend error: ${error.message}`);
 }
 
-/** Minimal sender; a later task adds templates and an email log. */
+/**
+ * Renders the kind's branded template (HTML + plain text) and sends it. Admin kinds go to
+ * ADMIN_EMAILS when set. With `opts.ref` the email is claimed in email_log first and skipped if
+ * already sent; a failed send releases the claim (and throws) so a later run retries it.
+ */
 export async function sendEmail(
   kind: EmailKind,
   to: string,
   data: Record<string, unknown>,
   attachments?: EmailAttachment[],
+  opts?: SendOptions,
 ): Promise<void> {
-  const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const recipients = ADMIN_KINDS.has(kind) && admins.length > 0 ? admins : [to];
-  const msg: OutgoingEmail = {
-    from: FROM,
-    to: recipients,
-    ...render(kind, data),
-    ...(attachments && attachments.length > 0 ? { attachments } : {}),
-  };
-  await (override ?? defaultTransport)(msg);
+  let logDb: SqlClient | null = null;
+  if (opts?.ref) {
+    logDb = opts.db ?? (await getSqlClient());
+    if (logDb && !(await claimEmail(logDb, kind, to, opts.ref))) return;
+  }
+  try {
+    const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    const recipients = ADMIN_KINDS.has(kind) && admins.length > 0 ? admins : [to];
+    const msg: OutgoingEmail = {
+      from: FROM,
+      to: recipients,
+      ...(await renderEmail(kind, data)),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      tags: [{ name: "kind", value: kind }],
+    };
+    await (override ?? defaultTransport)(msg);
+  } catch (err) {
+    if (logDb && opts?.ref) {
+      await releaseEmail(logDb, kind, to, opts.ref).catch((e) => console.error("[email] could not release email_log claim", e));
+    }
+    throw err;
+  }
 }
 
 /** Sends through `send` without throwing (failures are logged): for emails after a committed change. */
@@ -107,9 +128,11 @@ export async function sendQuietly(
   to: string,
   data: Record<string, unknown>,
   attachments?: EmailAttachment[],
+  opts?: SendOptions,
 ): Promise<boolean> {
   try {
-    await (attachments ? send(kind, to, data, attachments) : send(kind, to, data));
+    if (opts) await send(kind, to, data, attachments, opts);
+    else await (attachments ? send(kind, to, data, attachments) : send(kind, to, data));
     return true;
   } catch (err) {
     console.error(`[email] ${kind} to ${to} failed`, err);

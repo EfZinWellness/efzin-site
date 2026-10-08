@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { handleStripeEvent } from "../../lib/stripe/handlers";
 import { startPayRest } from "../../lib/stripe/selfServe";
 import { chargeScheduledItem } from "../../lib/stripe/invoices";
-import { ORIGIN, count, event, invoiceEvent, planBooking, world, type World } from "./webhookFixtures";
+import { NOW, ORIGIN, count, event, invoiceEvent, planBooking, world, type World } from "./webhookFixtures";
 
 let w: World;
 let bookingId: string;
@@ -90,7 +90,7 @@ describe("pay_rest completion", () => {
 
   it("when the refund fails, still voids the settled items' invoices and alerts Tanya without failing", async () => {
     // Item 2 has an open invoice that Stripe is retrying.
-    await chargeScheduledItem(w.db, w.stripe, items[2].id);
+    await chargeScheduledItem(w.db, w.stripe, items[2].id, NOW);
     const inv = (await w.db.query<{ stripe_invoice_id: string }>("select stripe_invoice_id from payment_schedule_items where id = $1", [items[2].id])).rows[0].stripe_invoice_id;
     w.stripe.invoiceStatus[inv] = "open";
     await w.db.query("update payment_schedule_items set status = 'failed' where id = $1", [items[2].id]);

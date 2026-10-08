@@ -11,6 +11,9 @@ type ItemRow = {
   id: string;
   booking_id: string;
   status: string;
+  stripe_invoice_id: string | null;
+  /** Settled by a "Pay the rest now" Checkout. */
+  pay_rest: boolean;
   amount_minor: number;
   currency: string;
   booking_status: string;
@@ -22,15 +25,19 @@ type ItemRow = {
   timezone: string;
 };
 
-type Locked = { item: ItemRow; active: boolean } | null;
+type Locked = { item: ItemRow; active: boolean; settled?: boolean } | null;
 
-/** The scheduled item an invoice is for, locked with its booking; null if it isn't ours or is already settled. */
-async function lockItem(db: SqlClient, invoice: Stripe.Invoice): Promise<Locked> {
+/**
+ * The scheduled item an invoice is for, locked with its booking; null if it isn't ours or is
+ * already settled. With `includeSettled`, a paid item comes back as `{ settled: true }`.
+ */
+async function lockItem(db: SqlClient, invoice: Stripe.Invoice, includeSettled = false): Promise<Locked> {
   const md = invoice.metadata ?? {};
   if (md.kind !== "scheduled_payment" || !md.item_id) return null;
   const r = await db.query<ItemRow>(
-    `select i.id, i.booking_id, i.status, i.amount_minor, i.currency, b.status as booking_status,
-            p.name as booker_name, p.email as booker_email, e.title, e.start_at, e.balance_due_days, e.timezone
+    `select i.id, i.booking_id, i.status, i.stripe_invoice_id, i.amount_minor, i.currency, b.status as booking_status,
+            p.name as booker_name, p.email as booker_email, e.title, e.start_at, e.balance_due_days, e.timezone,
+            exists (select 1 from pay_rest_settlements s where i.id = any(s.settled_item_ids)) as pay_rest
        from payment_schedule_items i
        join bookings b on b.id = i.booking_id
        join people p on p.id = b.booker_person_id
@@ -42,6 +49,7 @@ async function lockItem(db: SqlClient, invoice: Stripe.Invoice): Promise<Locked>
   const item = r.rows[0];
   if (!item) return null;
   if (!ACTIVE_BOOKING.has(item.booking_status)) return { item, active: false };
+  if (item.status === "paid" && includeSettled) return { item, active: true, settled: true };
   if (item.status === "paid" || item.status === "cancelled") return null;
   return { item, active: true };
 }
@@ -59,10 +67,22 @@ const alertTanya =
  */
 export async function onInvoicePaid(invoice: Stripe.Invoice, deps: WebhookDeps): Promise<AfterCommit | void> {
   const { db } = deps;
-  const locked = await lockItem(db, invoice);
+  const locked = await lockItem(db, invoice, true);
   if (!locked) return;
   const { item } = locked;
   const facts = { invoiceId: invoice.id, bookingId: item.booking_id, itemId: item.id };
+  if (locked.settled) {
+    // Already paid: a repeat of the same invoice is fine; another invoice (or "pay the rest") means paid twice.
+    if (item.stripe_invoice_id === invoice.id && !item.pay_rest) return;
+    return alertTanya(
+      deps,
+      "possible_double_payment",
+      `Invoice ${invoice.id} was paid for a scheduled payment that was already paid${
+        item.pay_rest ? " through \"Pay the rest now\"" : ` under invoice ${item.stripe_invoice_id ?? "(none)"}`
+      }. The guest may have paid twice; please check and refund if needed.`,
+      { ...facts, paidInvoiceId: item.stripe_invoice_id, amountPaid: invoice.amount_paid, currency: invoice.currency },
+    );
+  }
   if (!locked.active) {
     return alertTanya(deps, "payment_on_inactive_booking", `Payment received on cancelled booking ${item.booking_id}; refund needed`, {
       ...facts,
@@ -105,6 +125,35 @@ export async function onInvoicePaid(invoice: Stripe.Invoice, deps: WebhookDeps):
       bookingId: item.booking_id,
     });
   };
+}
+
+/**
+ * `invoice.overdue`: a pay-by-link invoice passed its due date unpaid. Nothing changes (the daily
+ * job still cancels the booking if the balance is unpaid after the balance due date); Tanya is told.
+ */
+export async function onInvoiceOverdue(invoice: Stripe.Invoice, deps: WebhookDeps): Promise<AfterCommit | void> {
+  if (invoice.collection_method !== "send_invoice") return;
+  const locked = await lockItem(deps.db, invoice);
+  if (!locked?.active) return;
+  const { item } = locked;
+  const balanceDueOn = item.start_at ? balanceDueDate(new Date(item.start_at), item.balance_due_days, item.timezone) : null;
+  return alertTanya(
+    deps,
+    "invoice_overdue",
+    `A pay-by-link invoice for ${item.title} is overdue. The guest has no saved card; if it is still unpaid after ${
+      balanceDueOn ?? "the balance due date"
+    }, the booking will be cancelled automatically.`,
+    {
+      invoiceId: invoice.id,
+      bookingId: item.booking_id,
+      itemId: item.id,
+      booker: `${item.booker_name} <${item.booker_email}>`,
+      amountMinor: item.amount_minor,
+      currency: item.currency,
+      payUrl: invoice.hosted_invoice_url ?? null,
+      balanceDueOn,
+    },
+  );
 }
 
 /**

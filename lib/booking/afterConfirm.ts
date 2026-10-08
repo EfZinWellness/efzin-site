@@ -1,6 +1,8 @@
 import { provisionPeople, type AuthAdmin } from "../auth/provision";
 import type { SqlClient } from "../content/sync";
-import type { EmailKind, SendEmailFn } from "../email/send";
+import { buildIcs } from "../email/ics";
+import type { EmailAttachment, EmailKind, SendEmailFn } from "../email/send";
+import { maskCode } from "../giftcards/deliver";
 import { adminAddress } from "../requests/handlers";
 import type { ConfirmOutcome } from "./confirm";
 
@@ -21,9 +23,9 @@ type Guest = { person_id: string; name: string; email: string; is_booker: boolea
  */
 export async function afterBookingConfirmed(db: SqlClient, outcome: ConfirmOutcome, fx: ConfirmEffects): Promise<void> {
   const failures: string[] = [];
-  const send = async (kind: EmailKind, to: string, data: Record<string, unknown>) => {
+  const send = async (kind: EmailKind, to: string, data: Record<string, unknown>, attachments?: EmailAttachment[]) => {
     try {
-      await fx.sendEmail(kind, to, data);
+      await (attachments ? fx.sendEmail(kind, to, data, attachments) : fx.sendEmail(kind, to, data));
     } catch (err) {
       console.error(`[email] ${kind} to ${to} failed`, err);
       failures.push(`${kind} → ${to}: ${err instanceof Error ? err.message : String(err)}`);
@@ -44,9 +46,17 @@ export async function afterBookingConfirmed(db: SqlClient, outcome: ConfirmOutco
         presentment_currency: string;
         amount_aed_minor: number;
         base_currency: string;
+        end_at: string | Date | null;
+        timezone: string;
+        venue: string | null;
+        type: string;
+        policy_snapshot: { template?: string; copy?: string[] } | string | null;
+        gift_card_id: string | null;
+        gift_card_applied_aed_minor: number;
       }>(
         `select b.experience_id, e.title, e.slug, e.start_at, b.status, b.payment_option, b.amount_paid_minor,
-                b.presentment_currency, b.amount_aed_minor, b.base_currency
+                b.presentment_currency, b.amount_aed_minor, b.base_currency, e.end_at, e.timezone, e.venue, e.type,
+                b.policy_snapshot, b.gift_card_id, b.gift_card_applied_aed_minor
            from bookings b join experiences e on e.id = b.experience_id where b.id = $1`,
         [bookingId],
       )
@@ -78,27 +88,73 @@ export async function afterBookingConfirmed(db: SqlClient, outcome: ConfirmOutco
     );
     const linkFor = (g: Guest) => prov.links.get(g.person_id) ?? accountUrl;
 
-    await send("booking_confirmed", booker.email, {
-      name: booker.name,
-      experience: b.title,
-      startsAt: b.start_at ? new Date(b.start_at).toISOString() : null,
-      bookingId,
+    const snapshot = typeof b.policy_snapshot === "string" ? JSON.parse(b.policy_snapshot) : (b.policy_snapshot ?? {});
+    const experienceUrl = `${fx.origin}/${b.type === "retreat" ? "retreats" : "events"}/${b.slug}`;
+    const calendar: EmailAttachment[] = b.start_at
+      ? [
+          {
+            filename: `ef-zin-${b.slug}.ics`,
+            contentType: "text/calendar; charset=utf-8; method=PUBLISH",
+            content: buildIcs({
+              uid: `booking-${bookingId}@efzinwellness.com`,
+              title: `Ef Zin: ${b.title}`,
+              startsAt: b.start_at,
+              endsAt: b.end_at,
+              location: b.venue,
+              url: experienceUrl,
+              now: new Date(),
+            }),
+          },
+        ]
+      : [];
+    await send(
+      "booking_confirmed",
+      booker.email,
+      {
+        name: booker.name,
+        experience: b.title,
+        startsAt: b.start_at ? new Date(b.start_at).toISOString() : null,
+        timezone: b.timezone,
+        venue: b.venue,
+        policy: Array.isArray(snapshot.copy) ? snapshot.copy : [],
+        policyTemplate: snapshot.template ?? null,
+        calendar: calendar.length > 0,
+        bookingId,
       paymentOption: b.payment_option,
       amountPaidMinor: b.amount_paid_minor,
       currency: b.presentment_currency,
       schedule: schedule.map((i) => ({ seq: i.seq, dueOn: i.due_on, amountMinor: i.amount_minor, currency: i.currency, status: i.status })),
-      guests: others.map((g) => g.name),
-      claimLink: linkFor(booker),
-      detailsLink: accountUrl,
-    });
+        guests: others.map((g) => g.name),
+        claimLink: linkFor(booker),
+        detailsLink: accountUrl,
+      },
+      calendar.length > 0 ? calendar : undefined,
+    );
     for (const g of others) {
       await send("guest_added", g.email, {
         name: g.name,
         bookerName: booker.name,
         experience: b.title,
         startsAt: b.start_at ? new Date(b.start_at).toISOString() : null,
+        timezone: b.timezone,
         claimLink: linkFor(g),
       });
+    }
+    if (b.gift_card_id && b.gift_card_applied_aed_minor > 0) {
+      const card = (
+        await db.query<{ code: string; balance_aed_minor: number }>("select code, balance_aed_minor from gift_cards where id = $1", [
+          b.gift_card_id,
+        ])
+      ).rows[0];
+      if (card) {
+        await send("gift_card_used", booker.email, {
+          name: booker.name,
+          experience: b.title,
+          amountUsedAedMinor: b.gift_card_applied_aed_minor,
+          balanceAedMinor: card.balance_aed_minor,
+          codeMasked: maskCode(card.code),
+        });
+      }
     }
 
     const spots = await db.query<{ id: string; key: string; capacity: number; sold: number; remaining: number }>(

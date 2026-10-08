@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 import type { SqlClient } from "../content/sync";
-import { endOfDayEpoch } from "../payments/schedule";
+import { calendarDate, endOfDayEpoch } from "../payments/schedule";
 import { refId, type StripeApi } from "./client";
 import { ensureStripeCustomer } from "./customers";
 
@@ -34,8 +34,13 @@ type Item = {
  *   paid straight away. A decline returns `failed`; the `invoice.payment_failed` webhook
  *   records it and emails the guest.
  * - No customer or no saved card: the customer is created if needed and a `send_invoice`
- *   invoice due at the end of the item's due date (experience timezone) is finalized; Stripe
- *   emails the pay link. The item stays `scheduled` until `invoice.paid`.
+ *   invoice due at the end of the item's due date (experience timezone; or of today there, when
+ *   collected late) is finalized and sent (`sendInvoice`), so Stripe emails the pay link. The
+ *   item stays `scheduled` until `invoice.paid`. A finalized pay-by-link invoice found on a later
+ *   run is sent again with the same idempotency key (a no-op within Stripe's 24-hour window).
+ *
+ * `now` is the caller's clock (the daily job's run time); nothing here reads the system clock, so
+ * a retried create sends identical parameters under its idempotency key.
  *
  * The invoice is built as a draft (`auto_advance: false`, so Stripe never finalizes it
  * half-built), its id stored at once, then the line added and the invoice finalized (with
@@ -44,7 +49,7 @@ type Item = {
  * invoice is finalized/paid. Skips items whose booking isn't `deposit_paid`, items not due for
  * collection, and invoices already paid, voided, or being retried / paid by link.
  */
-export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, itemId: string): Promise<ChargeResult> {
+export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, itemId: string, now: Date): Promise<ChargeResult> {
   const r = await db.query<Item>(
     `select i.booking_id, i.seq, i.status, i.amount_minor, i.currency, to_char(i.due_on, 'YYYY-MM-DD') as due_on,
             i.stripe_invoice_id, b.status as booking_status, b.booker_person_id, p.stripe_customer_id,
@@ -70,7 +75,8 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
     collection = inv.collection_method;
     if (inv.status === "open") {
       // Finalized but never paid by us (e.g. stopped before pay). Failed items are Stripe's to retry;
-      // pay-by-link invoices are the guest's to pay.
+      // pay-by-link invoices are the guest's to pay (make sure the link went out).
+      if (collection === "send_invoice" && item.status === "scheduled") return send(stripe, invoiceId, key);
       if (collection !== "charge_automatically" || item.status !== "scheduled") return { status: "skipped" };
       return pay(stripe, invoiceId, key);
     }
@@ -85,7 +91,9 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
     if (c.deleted) throw new Error(`STRIPE_CUSTOMER_DELETED for schedule item ${itemId}`);
     const pm = refId(c.invoice_settings?.default_payment_method);
     collection = pm ? "charge_automatically" : "send_invoice";
-    const dueDate = Math.max(endOfDayEpoch(item.due_on, item.timezone), Math.floor(Date.now() / 1000) + 3600);
+    // Stripe needs a future due date: the item's date, or today (experience timezone) when late.
+    const today = calendarDate(now, item.timezone);
+    const dueDate = endOfDayEpoch(item.due_on > today ? item.due_on : today, item.timezone);
     const created = await stripe.invoices.create(
       {
         customer,
@@ -122,8 +130,18 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
     );
   }
   await stripe.invoices.finalizeInvoice(invoiceId, { auto_advance: true }, key("finalize"));
-  if (collection !== "charge_automatically") return { status: "invoiced", invoiceId };
+  if (collection !== "charge_automatically") return send(stripe, invoiceId, key);
   return pay(stripe, invoiceId, key);
+}
+
+/** Emails a finalized pay-by-link invoice to the guest (Stripe's hosted pay page). */
+async function send(
+  stripe: StripeApi,
+  invoiceId: string,
+  key: (step: string) => Stripe.RequestOptions,
+): Promise<ChargeResult> {
+  await stripe.invoices.sendInvoice(invoiceId, {}, key("send"));
+  return { status: "invoiced", invoiceId };
 }
 
 async function pay(

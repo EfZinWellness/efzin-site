@@ -54,7 +54,7 @@ describe("checkout.session.completed (booking)", () => {
     expect(await count(w.db, "select * from holds where released_at is null")).toBe(0);
     expect(await count(w.db, "select * from gift_card_ledger where reason = 'redeem'")).toBe(1);
 
-    expect(kinds()).toEqual(["admin_new_booking", "booking_confirmed", "guest_added"]);
+    expect(kinds()).toEqual(["admin_new_booking", "booking_confirmed", "gift_card_used", "guest_added"]);
     const confirmed = w.emails.find((e) => e.kind === "booking_confirmed")!;
     expect(confirmed.to).toBe("layla@email.com");
     expect(confirmed.data.claimLink).toContain("layla%40email.com");
@@ -77,7 +77,7 @@ describe("checkout.session.completed (booking)", () => {
     await handleStripeEvent(evt, w.deps);
     expect(await handleStripeEvent(evt, w.deps)).toBe("duplicate");
     expect(await count(w.db, "select * from bookings")).toBe(1);
-    expect(w.emails).toHaveLength(3);
+    expect(w.emails).toHaveLength(4); // confirmation, guest added, gift card used, Tanya's note
   });
 
   it("saves the SetupIntent card as the customer default in setup mode", async () => {

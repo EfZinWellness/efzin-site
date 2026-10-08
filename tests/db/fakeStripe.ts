@@ -20,6 +20,10 @@ export class FakeStripe implements StripeApi {
   invoiceFinalized: { id: string; params?: Stripe.InvoiceFinalizeInvoiceParams }[] = [];
   invoicePaid: string[] = [];
   voided: string[] = [];
+  /** invoices.sendInvoice calls (pay-by-link emails), with their idempotency key. */
+  invoicesSent: { id: string; idempotencyKey?: string }[] = [];
+  /** Set to make the next sendInvoice call throw (once). */
+  sendInvoiceError: unknown = null;
   /** Set to make the next invoiceItems.create / voidInvoice call throw (once). */
   invoiceItemError: unknown = null;
   voidError: unknown = null;
@@ -118,6 +122,15 @@ export class FakeStripe implements StripeApi {
       this.invoicePaid.push(id);
       this.invoiceStatus[id] = "paid";
       return { id, status: "paid" as InvoiceStatus };
+    },
+    sendInvoice: async (id: string, _params?: Stripe.InvoiceSendInvoiceParams, options?: Stripe.RequestOptions) => {
+      if (this.sendInvoiceError) {
+        const e = this.sendInvoiceError;
+        this.sendInvoiceError = null;
+        throw e;
+      }
+      this.invoicesSent.push({ id, idempotencyKey: options?.idempotencyKey });
+      return { id };
     },
     voidInvoice: async (id: string) => {
       if (this.voidError) {

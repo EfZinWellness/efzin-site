@@ -339,10 +339,10 @@ describe("buyer receipt for single gifts", () => {
   });
 
   it("delivery email mentions the printable card only when a PDF is attached", async () => {
-    const { renderGiftEmail } = await import("../../lib/email/giftEmails");
+    const { renderEmail } = await import("../../lib/email/render");
     const base = { recipientName: "Noor", code: "EFZG-AAAA-BBBB", value: "AED 500", expiresOn: "2028-01-10", bookUrl: "x" };
-    expect(renderGiftEmail("gift_card_delivered", { ...base, hasPdf: true }).text).toContain("printable card is attached");
-    const without = renderGiftEmail("gift_card_delivered", { ...base, hasPdf: false });
+    expect((await renderEmail("gift_card_delivered", { ...base, hasPdf: true })).text).toContain("printable card is attached");
+    const without = await renderEmail("gift_card_delivered", { ...base, hasPdf: false });
     expect(without.text).not.toContain("printable");
     expect(without.html).not.toContain("printable");
   });

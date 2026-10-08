@@ -4,6 +4,7 @@ import { chargeScheduledItem } from "../../lib/stripe/invoices";
 import { issueGiftCards } from "../../lib/giftcards/db";
 import {
   EVENT,
+  NOW,
   buyerId,
   checkout,
   count,
@@ -119,7 +120,7 @@ describe("scheduled payments", () => {
 describe("pay_rest and update_card", () => {
   it("pay_rest marks remaining items paid, voids their open invoices, booking paid", async () => {
     const { bookingId, items } = await planBooking(w, "instalments");
-    await chargeScheduledItem(w.db, w.stripe, items[1].id);
+    await chargeScheduledItem(w.db, w.stripe, items[1].id, NOW);
     w.stripe.invoiceStatus.in_test_1 = "open"; // charge failed and Stripe is retrying
     await w.db.query("update payment_schedule_items set status = 'failed' where id = $1", [items[1].id]);
     await handleStripeEvent(
@@ -140,8 +141,8 @@ describe("pay_rest and update_card", () => {
 
   it("update_card sets the default card and updates every open invoice (paginated)", async () => {
     const { items } = await planBooking(w, "instalments");
-    await chargeScheduledItem(w.db, w.stripe, items[1].id);
-    await chargeScheduledItem(w.db, w.stripe, items[2].id);
+    await chargeScheduledItem(w.db, w.stripe, items[1].id, NOW);
+    await chargeScheduledItem(w.db, w.stripe, items[2].id, NOW);
     w.stripe.invoiceStatus.in_test_1 = "open";
     w.stripe.invoiceStatus.in_test_2 = "open";
     w.stripe.pageSize = 1;
@@ -248,7 +249,7 @@ describe("gift purchases and refunds", () => {
 
   async function refundable() {
     const { bookingId, items } = await planBooking(w);
-    await chargeScheduledItem(w.db, w.stripe, items[1].id);
+    await chargeScheduledItem(w.db, w.stripe, items[1].id, NOW);
     w.stripe.invoiceStatus.in_test_1 = "open";
     await w.db.query("update payment_schedule_items set status = 'failed' where id = $1", [items[1].id]);
     return bookingId;

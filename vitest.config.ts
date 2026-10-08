@@ -1,6 +1,8 @@
 ﻿import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // The app's "@/..." path alias (tsconfig), so route modules can be imported in tests.
+  resolve: { alias: [{ find: /^@\//, replacement: `${process.cwd().replace(/\\/g, "/")}/` }] },
   test: {
     include: ["tests/unit/**/*.test.ts", "tests/db/**/*.test.ts"],
     passWithNoTests: true,
