@@ -194,6 +194,20 @@ describe("daily job: unpaid at the balance due date", () => {
     expect(sent.filter((s) => s.kind === "booking_cancelled_unpaid")).toEqual([]);
   });
 
+  it("grace counts from the first charge attempt: missed on the due date, failed late on due+1, kept on due+2, cancelled on due+3", async () => {
+    savedCard("cus_a");
+    w.stripe.payError = Object.assign(new Error("declined"), { type: "StripeCardError" });
+    const b = await plan("amal@x.com", "cus_a", [{ seq: 1, dueOn: "2027-05-31", amount: 192000, status: "scheduled" }]);
+    await runDaily(w.db, at("2027-06-01"), deps);
+    expect(chargedItems()).toEqual([b.itemIds[1]]);
+    expect(await status("bookings", b.bookingId)).toBe("deposit_paid");
+    await runDaily(w.db, at("2027-06-02"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("deposit_paid");
+    await runDaily(w.db, at("2027-06-03"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("cancelled");
+    expect(chargedItems()).toHaveLength(1);
+  });
+
   it("the booking's agreed schedule governs, not the experience date (experience moved earlier)", async () => {
     const b = await attemptedAndFailed();
     await w.db.query("update experiences set start_at = '2027-05-20T07:00:00Z' where slug = 'test-retreat'");

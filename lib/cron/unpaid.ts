@@ -6,7 +6,7 @@ import type { StripeApi } from "../stripe/client";
 import { bookingInvoices, voidOpenInvoices } from "../stripe/invoices";
 import { mail, report, type JobContext } from "./context";
 
-/** Days after the last unpaid instalment's due date before the booking is cancelled (Stripe retries, pay links). */
+/** Days after an unpaid instalment's due date or first charge attempt (the later) before cancelling (Stripe retries, pay links). */
 export const UNPAID_GRACE_DAYS = 2;
 /** Cancellation notices that failed are retried for this long. */
 const NOTICE_RETRY_DAYS = 30;
@@ -48,8 +48,8 @@ function moneyBack(b: BookingFacts, at: Date): CancelOption[] {
 /**
  * Spec §6.3/§9, per the booking's own agreed schedule: a part-paid booking is cancelled (a guest
  * default) only when every unpaid instalment is past due, every one of them was actually
- * attempted (invoiced, or failed), and the last one fell due at least UNPAID_GRACE_DAYS ago (Dubai
- * dates). Never-attempted items are charged late by chargeDueItems instead. Cancelling cancels the
+ * attempted (invoiced, or failed), and for each of them UNPAID_GRACE_DAYS have passed since the
+ * later of its due date and its first charge attempt (Dubai dates). Never-attempted items are charged late by chargeDueItems instead. Cancelling cancels the
  * unpaid items (never charged afterwards), voids open invoices and frees the spots; money back
  * follows the policy (none at 10 days before a retreat). The notices go out from
  * sendUnpaidCancellationNotices.
@@ -66,7 +66,8 @@ export async function cancelUnpaidBookings(ctx: JobContext, stripe: StripeApi | 
       group by b.id, p.id, e.id
      having bool_and(i.due_on < $1::date)
         and bool_and(i.stripe_invoice_id is not null or i.status = 'failed')
-        and max(i.due_on) + $2::int <= $1::date
+        and bool_and(greatest(i.due_on, coalesce(((i.first_attempted_at at time zone 'UTC') + interval '4 hours')::date, i.due_on))
+                     + $2::int <= $1::date)
       order by b.created_at`,
     [today, UNPAID_GRACE_DAYS],
   );

@@ -93,6 +93,18 @@ describe("chargeScheduledItem", () => {
     expect(await item(items[1].id)).toEqual({ status: "scheduled", stripe_invoice_id: "in_test_1" });
   });
 
+  it("records the first charge attempt once, from the given clock", async () => {
+    const { items } = await planBooking(w);
+    w.stripe.payError = Object.assign(new Error("declined"), { type: "StripeCardError" });
+    await chargeScheduledItem(w.db, w.stripe, items[1].id, new Date("2027-05-31T02:00:00Z"));
+    await w.db.query("update payment_schedule_items set stripe_invoice_id = null where id = $1", [items[1].id]);
+    await chargeScheduledItem(w.db, w.stripe, items[1].id, new Date("2027-06-05T02:00:00Z"));
+    const r = await w.db.query<{ t: string }>("select first_attempted_at::text as t from payment_schedule_items where id = $1", [
+      items[1].id,
+    ]);
+    expect(new Date(r.rows[0].t).toISOString()).toBe("2027-05-31T02:00:00.000Z");
+  });
+
   it("customer without a default card: sends a pay-by-link invoice", async () => {
     const { items } = await planBooking(w);
     w.stripe.customerUpdates = [];

@@ -108,10 +108,12 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
       key("invoice"),
     );
     invoiceId = created.id;
-    await db.query("update payment_schedule_items set stripe_invoice_id = $2 where id = $1 and stripe_invoice_id is null", [
-      itemId,
-      invoiceId,
-    ]);
+    await db.query(
+      `update payment_schedule_items
+          set stripe_invoice_id = $2, first_attempted_at = coalesce(first_attempted_at, $3)
+        where id = $1 and stripe_invoice_id is null`,
+      [itemId, invoiceId, now.toISOString()],
+    );
     needsLine = true;
   }
 
