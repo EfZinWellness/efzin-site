@@ -9,7 +9,10 @@ const CONTENT_DIR = path.join(process.cwd(), "content");
 export type ExperienceStatus = Experience["status"];
 
 export async function loadExperiences(): Promise<Experience[]> {
-  const dir = path.join(CONTENT_DIR, "experiences");
+  return readExperienceDir(path.join(CONTENT_DIR, "experiences"));
+}
+
+async function readExperienceDir(dir: string): Promise<Experience[]> {
   const files = (await fs.readdir(dir)).filter((f) => /\.ya?ml$/.test(f)).sort();
   const out: Experience[] = [];
   for (const f of files) {
@@ -25,7 +28,13 @@ export async function loadExperiences(): Promise<Experience[]> {
 
 export async function loadExperience(slug: string): Promise<Experience | null> {
   const all = await loadExperiences();
-  return all.find((e) => e.slug === slug) ?? null;
+  const found = all.find((e) => e.slug === slug);
+  if (found) return found;
+  // Test hook (playwright.config.ts): extra experiences reachable by slug only, never listed.
+  const extra = process.env.EFZIN_EXTRA_CONTENT_DIR;
+  if (!extra) return null;
+  const more = await readExperienceDir(path.join(process.cwd(), extra, "experiences"));
+  return more.find((e) => e.slug === slug) ?? null;
 }
 
 /** When the experience has ended the site treats it as past, whatever the file says. */

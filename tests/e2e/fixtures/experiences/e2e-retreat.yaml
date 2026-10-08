@@ -1,0 +1,29 @@
+# Test-only experience, loaded when EFZIN_EXTRA_CONTENT_DIR points at tests/e2e/fixtures.
+# Never listed on the site: only loadExperience(slug) falls back to this directory.
+slug: e2e-retreat
+type: retreat
+title: "E2E Retreat"
+startsAt: "2030-06-10T10:00:00+03:00"
+endsAt: "2030-06-14T16:00:00+03:00"
+timezone: Europe/Athens
+venue:
+  name: Greece
+pillars: [move, nourish]
+status: on_sale
+baseCurrency: EUR
+policy: standard_retreat
+depositPct: 20
+paymentOptions: [full, deposit_balance, instalments]
+maxInstalments: 4
+totalPriceMinor: 240000
+heroImage: /images/placeholder.jpg
+summary: A retreat used by the booking form tests.
+tickets:
+  - key: shared
+    name: Shared room
+    priceMinor: 240000
+    capacity: 10
+  - key: private
+    name: Private room
+    priceMinor: 300000
+    capacity: 4

@@ -217,6 +217,8 @@ export type PendingBooking = {
   reservation_ids: string[];
   checkout_session_id: string | null;
   created_at: string;
+  /** Set once the checkout has become a booking (0007). */
+  confirmed_booking_id: string | null;
 };
 
 export type PaymentScheduleStatus = "scheduled" | "paid" | "failed" | "cancelled";

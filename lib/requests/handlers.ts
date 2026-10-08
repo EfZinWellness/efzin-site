@@ -12,7 +12,7 @@ export interface HandlerResult {
 
 export const ADMIN_FALLBACK = "contact@efzinwellness.com";
 
-function adminAddress(): string {
+export function adminAddress(): string {
   return process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || ADMIN_FALLBACK;
 }
 
