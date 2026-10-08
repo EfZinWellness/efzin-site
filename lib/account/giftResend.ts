@@ -5,6 +5,7 @@ import { dubaiToday } from "../giftcards/dates";
 import { formatAed } from "../giftcards/money";
 import { createLimiter } from "../requests/throttle";
 import { UUID_RE } from "./bookings";
+import { giftSql } from "./giftCards";
 
 export interface ResendDeps {
   sendEmail: (kind: "gift_card_delivered", to: string, data: Record<string, unknown>, attachments?: EmailAttachment[]) => Promise<void>;
@@ -48,9 +49,8 @@ export async function resendGiftCard(
        join people b on b.id = g.buyer_person_id
        join people me on me.id = $2
        left join experiences x on x.id = g.suggested_experience_id
-      where g.id = $1 and g.status = 'active'
-        and (g.buyer_person_id = me.id or g.recipient_person_id = me.id or lower(g.recipient_email) = lower(me.email))`,
-    [giftCardId, personId],
+      where g.id = $1 and g.status = 'active' and ${giftSql("$3").holdsCode}`,
+    [giftCardId, personId, dubaiToday(deps.now ?? new Date())],
   );
   const card = r.rows[0];
   if (!card) return "not_found";

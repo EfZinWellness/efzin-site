@@ -25,7 +25,11 @@ export interface HealthProfile {
   pregnancy: boolean;
   allergies: string;
   dietary: string;
+  /** Latest confirmation of consent. */
   consentAt: string | null;
+  /** First time consent was given (kept as the record of consent). */
+  consentGivenAt: string | null;
+  updatedAt: string;
 }
 
 export async function loadHealth(
@@ -39,9 +43,13 @@ export async function loadHealth(
     allergies: string | null;
     dietary: string | null;
     consent_at: string | Date | null;
-  }>("select conditions, injuries, pregnancy, allergies, dietary, consent_at from health_profiles where person_id = $1", [
-    personId,
-  ]);
+    consent_given_at: string | Date | null;
+    updated_at: string | Date;
+  }>(
+    `select conditions, injuries, pregnancy, allergies, dietary, consent_at, consent_given_at, updated_at
+       from health_profiles where person_id = $1`,
+    [personId],
+  );
   const w = await db.query<{ accepted_at: string | Date }>(
     "select accepted_at from waivers where person_id = $1 and version = $2 order by accepted_at desc limit 1",
     [personId, WAIVER_VERSION],
@@ -56,6 +64,8 @@ export async function loadHealth(
           allergies: p.allergies ?? "",
           dietary: p.dietary ?? "",
           consentAt: p.consent_at === null ? null : new Date(p.consent_at).toISOString(),
+          consentGivenAt: p.consent_given_at === null ? null : new Date(p.consent_given_at).toISOString(),
+          updatedAt: new Date(p.updated_at).toISOString(),
         }
       : null,
     waiverAcceptedAt: w.rows[0] ? new Date(w.rows[0].accepted_at).toISOString() : null,
@@ -88,11 +98,13 @@ export async function saveHealth(db: SqlClient, personId: string, input: unknown
   const v = parsed.data;
   const at = now.toISOString();
   await db.query(
-    `insert into health_profiles (person_id, conditions, injuries, pregnancy, allergies, dietary, consent_at, updated_at)
-     values ($1, nullif($2, ''), nullif($3, ''), $4, nullif($5, ''), nullif($6, ''), $7, $7)
+    `insert into health_profiles
+       (person_id, conditions, injuries, pregnancy, allergies, dietary, consent_at, consent_given_at, updated_at)
+     values ($1, nullif($2, ''), nullif($3, ''), $4, nullif($5, ''), nullif($6, ''), $7, $7, $7)
      on conflict (person_id) do update set
        conditions = excluded.conditions, injuries = excluded.injuries, pregnancy = excluded.pregnancy,
        allergies = excluded.allergies, dietary = excluded.dietary, consent_at = excluded.consent_at,
+       consent_given_at = coalesce(health_profiles.consent_given_at, excluded.consent_given_at),
        updated_at = excluded.updated_at`,
     [personId, v.conditions, v.injuries, v.pregnancy, v.allergies, v.dietary, at],
   );

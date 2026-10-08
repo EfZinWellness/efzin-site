@@ -150,11 +150,13 @@ describe("loadGiftCards", () => {
     const b = (await w.db.query<{ id: string }>("select id from gift_cards where stripe_payment_intent = 'pi_b'")).rows[0].id;
     await w.db.query("select gift_card_ledger_add($1, null, -5000, 'redeem')", [b]);
 
-    const g = await loadGiftCards(w.db, me);
+    const g = await loadGiftCards(w.db, me, NOW);
     expect(g.bought).toHaveLength(1);
     expect(g.bought[0]).toMatchObject({ balanceAedMinor: 50000, initialAedMinor: 50000, status: "active", recipientLabel: "Noor" });
     // A card bought for someone else shows masked.
     expect(g.bought[0].code).toMatch(/^EFZG-••••-/);
+    expect(g.bought[0].canResend).toBe(false);
+    expect(g.received[0].canResend).toBe(true);
     expect(g.received).toHaveLength(1);
     expect(g.received[0]).toMatchObject({ balanceAedMinor: 15000, initialAedMinor: 20000, fromName: "Fadi" });
     expect(g.received[0].code).toMatch(/^EFZG-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
@@ -197,6 +199,17 @@ describe("health and waiver", () => {
     // Saving again does not add a second waiver row.
     await saveHealth(w.db, layla, { consent: true, waiver: true }, NOW);
     expect((await w.db.query("select * from waivers")).rows).toHaveLength(1);
+  });
+
+  it("keeps the first consent time and tracks the latest update separately", async () => {
+    const { layla } = await retreatWithGuest();
+    await saveHealth(w.db, layla, { consent: true, dietary: "Vegan" }, NOW);
+    const later = new Date(NOW.getTime() + 86_400_000);
+    await saveHealth(w.db, layla, { consent: true, dietary: "Vegetarian" }, later);
+    const h = await loadHealth(w.db, layla);
+    expect(h.profile?.consentGivenAt).toBe(NOW.toISOString());
+    expect(h.profile?.updatedAt).toBe(later.toISOString());
+    expect(h.profile?.dietary).toBe("Vegetarian");
   });
 
   it("saves health with consent but leaves bookings incomplete until the waiver is accepted", async () => {
@@ -278,6 +291,34 @@ describe("resendGiftCard", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: "gift_card_delivered", to: "mona@example.com" });
     expect(sent[0].data.code).toBe(mine.code);
+  });
+
+  it("does not show or re-send a recipient's card before its delivery date", async () => {
+    const { me, sent, deps } = await setup();
+    const fadi = await idOf("fadi@example.com");
+    const [future] = await issueGiftCards(w.db, {
+      count: 1,
+      initialAedMinor: 30000,
+      buyerPersonId: fadi,
+      recipient: { name: "Mona", email: "mona@example.com" },
+      deliverOn: "2027-03-01",
+      paymentRef: "pi_f",
+    });
+    await activateGiftCards(w.db, "pi_f", NOW);
+    expect((await loadGiftCards(w.db, me, NOW)).received.map((c) => c.id)).not.toContain(future.id);
+    expect(await resendGiftCard(w.db, deps, me, future.id)).toBe("not_found");
+    expect(sent).toHaveLength(0);
+    // Fadi bought it for Mona: he sees it masked and cannot have the code re-sent.
+    const fadiView = await loadGiftCards(w.db, fadi, NOW);
+    const card = fadiView.bought.find((c) => c.id === future.id)!;
+    expect(card.code).toMatch(/^EFZG-••••-/);
+    expect(card.canResend).toBe(false);
+    expect(await resendGiftCard(w.db, deps, fadi, future.id)).toBe("not_found");
+    // On the delivery date it appears for Mona with the code.
+    const later = new Date("2027-03-01T06:00:00Z");
+    const mine = (await loadGiftCards(w.db, me, later)).received.find((c) => c.id === future.id)!;
+    expect(mine.canResend).toBe(true);
+    expect(await resendGiftCard(w.db, { ...deps, now: later }, me, future.id)).toBe("sent");
   });
 
   it("refuses a card that is not theirs", async () => {

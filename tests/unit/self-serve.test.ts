@@ -47,7 +47,23 @@ describe("startPayRest", () => {
     const s = w.stripe.sessions[0];
     expect(s.mode).toBe("payment");
     expect(s.customer).toBe("cus_test_1");
-    expect(s.metadata).toEqual({ kind: "pay_rest", booking_id: bookingId });
+    const unpaidIds = (
+      await w.db.query<{ id: string }>(
+        "select id from payment_schedule_items where booking_id = $1 and status in ('scheduled', 'failed') order by seq",
+        [bookingId],
+      )
+    ).rows.map((r) => r.id);
+    expect(s.metadata).toEqual({
+      kind: "pay_rest",
+      booking_id: bookingId,
+      item_ids: unpaidIds.join(","),
+      expected_amount_minor: String(expected),
+    });
+    expect(s.payment_intent_data?.metadata).toEqual(s.metadata);
+    // Expires after Stripe's 30-minute minimum (plus margin), so a stale session cannot be paid later.
+    const ttl = s.expires_at! - Math.floor(Date.now() / 1000);
+    expect(ttl).toBeGreaterThanOrEqual(30 * 60);
+    expect(ttl).toBeLessThanOrEqual(31 * 60 + 5);
     expect(s.line_items).toHaveLength(1);
     expect(s.line_items![0].price_data!.currency).toBe("eur");
     expect(s.line_items![0].price_data!.unit_amount).toBe(expected);

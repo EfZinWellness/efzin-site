@@ -127,6 +127,15 @@ export class FakeStripe implements StripeApi {
     },
   };
 
+  refundsCreated: { params: Stripe.RefundCreateParams; options?: Stripe.RequestOptions }[] = [];
+
+  refunds = {
+    create: async (params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions) => {
+      this.refundsCreated.push(options ? { params, options } : { params });
+      return { id: `re_test_${this.refundsCreated.length}` };
+    },
+  };
+
   invoiceItems = {
     create: async (params: Stripe.InvoiceItemCreateParams) => {
       if (this.invoiceItemError) {

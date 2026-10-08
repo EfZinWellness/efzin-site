@@ -56,6 +56,9 @@ export interface StripeApi {
     list(params: Stripe.InvoiceListParams): Promise<{ data: { id: string }[]; has_more: boolean }>;
     update(id: string, params: Stripe.InvoiceUpdateParams): Promise<{ id: string }>;
   };
+  refunds: {
+    create(params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions): Promise<{ id: string }>;
+  };
   invoiceItems: {
     create(params: Stripe.InvoiceItemCreateParams, options?: Stripe.RequestOptions): Promise<{ id: string }>;
   };

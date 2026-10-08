@@ -32,7 +32,7 @@ async function load(personId: string, email: string) {
     loadProfile(db, personId),
     loadBookings(db, personId, now),
     loadCredits(db, personId, now),
-    loadGiftCards(db, personId),
+    loadGiftCards(db, personId, now),
     healthComplete(db, personId),
   ]);
   return {

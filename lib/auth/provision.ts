@@ -14,6 +14,18 @@ type AuthErrorLike = { code?: string; status?: number; message?: string };
 const alreadyRegistered = (e: AuthErrorLike): boolean =>
   e.code === "email_exists" || /already (been )?registered|already exists/i.test(e.message ?? "");
 
+/**
+ * A sign-in link on the site itself: /account/auth/confirm?token_hash=…&type=magiclink, on the
+ * origin of `redirectTo`. The confirm page asks the member to tap "Sign in", then verifies the
+ * token on the server (so link scanners and cross-site requests cannot sign anyone in).
+ */
+export function claimLink(redirectTo: string, hashedToken: string): string {
+  const url = new URL("/account/auth/confirm", new URL(redirectTo).origin);
+  url.searchParams.set("token_hash", hashedToken);
+  url.searchParams.set("type", "magiclink");
+  return url.toString();
+}
+
 /** Supabase implementation (service role key: server only). */
 export function supabaseAuthAdmin(url: string, serviceRoleKey: string): AuthAdmin {
   const admin = createClient(url, serviceRoleKey, {
@@ -32,7 +44,8 @@ export function supabaseAuthAdmin(url: string, serviceRoleKey: string): AuthAdmi
     async magicLink(email, redirectTo) {
       const { data, error } = await admin.generateLink({ type: "magiclink", email, options: { redirectTo } });
       if (error) throw error;
-      return data.properties.action_link;
+      // Our own confirm page verifies the hashed token on the server (no tokens in a URL fragment).
+      return claimLink(redirectTo, data.properties.hashed_token);
     },
   };
 }

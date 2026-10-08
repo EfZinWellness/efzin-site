@@ -23,7 +23,7 @@ function Card({ card, line }: { card: AccountGiftCard; line: string }) {
         {line}
         {card.expiresAt ? ` · ${active ? "valid until" : "expired"} ${formatExpiry(card.expiresAt)}` : ""}
       </p>
-      {active ? (
+      {card.canResend ? (
         <ActionButton action={resendGiftAction} fields={{ giftCardId: card.id }} label="Email me the code" pendingLabel="Sending" className="mt-4" />
       ) : null}
     </li>
@@ -33,7 +33,7 @@ function Card({ card, line }: { card: AccountGiftCard; line: string }) {
 export default async function GiftCardsPage() {
   const me = await requirePerson();
   const db = await getSqlClient();
-  const { bought, received } = db ? await loadGiftCards(db, me.personId) : { bought: [], received: [] };
+  const { bought, received } = db ? await loadGiftCards(db, me.personId, new Date()) : { bought: [], received: [] };
 
   return (
     <div className="mx-auto max-w-md px-4 pb-20 pt-10">

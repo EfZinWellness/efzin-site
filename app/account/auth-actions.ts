@@ -50,6 +50,35 @@ export async function signInWithGoogle(): Promise<SignInState> {
   redirect(data.url);
 }
 
+const TOKEN_HASH_RE = /^[A-Za-z0-9_-]{8,256}$/;
+const OTP_TYPES = new Set(["magiclink", "email"]);
+
+/**
+ * Completes an emailed sign-in link (token_hash flow): verified on the server only after the
+ * member taps "Sign in" (a same-origin form post), so link scanners and other sites cannot
+ * sign anyone in.
+ */
+export async function confirmSignIn(form: FormData): Promise<void> {
+  const tokenHash = form.get("token_hash");
+  const type = form.get("type");
+  const supabase = await getSupabaseServer();
+  if (
+    !supabase ||
+    typeof tokenHash !== "string" ||
+    !TOKEN_HASH_RE.test(tokenHash) ||
+    typeof type !== "string" ||
+    !OTP_TYPES.has(type)
+  ) {
+    redirect("/account/signin?error=link");
+  }
+  const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: type as "magiclink" | "email" });
+  if (error) {
+    console.error("[auth] verifyOtp failed", error.message);
+    redirect("/account/signin?error=link");
+  }
+  redirect("/account");
+}
+
 export async function signOut(): Promise<void> {
   const supabase = await getSupabaseServer();
   if (supabase) await supabase.auth.signOut();

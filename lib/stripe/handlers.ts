@@ -10,7 +10,7 @@ import { adminAddress } from "../requests/handlers";
 import { refId, type StripeApi } from "./client";
 import { processOnce, sequence, type AfterCommit } from "./events";
 import { onInvoiceFailed, onInvoicePaid } from "./invoiceEvents";
-import { bookingInvoices, voidOpenInvoices } from "./invoices";
+import { completePayRest } from "./payRest";
 import { onChargeRefunded } from "./refunds";
 
 export interface WebhookDeps {
@@ -63,7 +63,7 @@ async function onSessionCompleted(s: Stripe.Checkout.Session, deps: WebhookDeps)
     case "gift_purchase":
       return completeGiftPurchase(s, deps);
     case "pay_rest":
-      return completePayRest(md.booking_id, deps);
+      return completePayRest(s, deps);
     case "update_card":
       return completeUpdateCard(s, deps);
     default:
@@ -142,35 +142,6 @@ async function completeGiftPurchase(s: Stripe.Checkout.Session, deps: WebhookDep
       }),
     () => onGiftCardsActivated(deps.db, pi, deps),
   );
-}
-
-async function completePayRest(bookingId: string | undefined, deps: WebhookDeps) {
-  const { db } = deps;
-  const b = await db.query<{ status: string }>("select status from bookings where id = $1 for update", [bookingId ?? null]);
-  const status = b.rows[0]?.status;
-  if (status !== "deposit_paid" && status !== "paid") {
-    return async () => {
-      await sendQuietly(deps.sendEmail, "admin_error", adminAddress(), {
-        context: "pay_rest_inactive_booking",
-        problem: "A guest paid the rest of a booking that is not active. Please refund or reinstate it.",
-        bookingId,
-        status,
-      });
-    };
-  }
-  const rest = await db.query<{ amount_minor: number }>(
-    `update payment_schedule_items set status = 'paid', paid_at = now()
-      where booking_id = $1 and status in ('scheduled', 'failed') returning amount_minor`,
-    [bookingId],
-  );
-  const sum = rest.rows.reduce((t, r) => t + r.amount_minor, 0);
-  await db.query(
-    "update bookings set status = 'paid', amount_paid_base_minor = coalesce(amount_paid_base_minor, 0) + $2 where id = $1",
-    [bookingId, sum],
-  );
-  // All of the booking's invoices (only open ones are voided), so a retry after a failed void still finds them.
-  const invoices = await bookingInvoices(db, bookingId!);
-  return () => voidOpenInvoices(deps.stripe, invoices);
 }
 
 async function completeUpdateCard(s: Stripe.Checkout.Session, deps: WebhookDeps) {
