@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import ScheduleTable from "./ScheduleTable";
 import CodeField, { type AppliedCode } from "./CodeField";
@@ -117,6 +118,10 @@ export default function BookingForm({ experience: e, nowIso, policy }: { experie
       <div role="status" className="mt-10 border border-sand/70 p-6 text-center">
         <p className="font-serif text-2xl">You&rsquo;re booked in.</p>
         <p className="mt-3 text-sm text-navy/80">Your confirmation will arrive by email shortly.</p>
+        <p className="mt-3 text-sm text-navy/80">
+          Your Ef Zin account is ready: sign in with your email to add your health details and waiver.
+        </p>
+        <Link href="/account/health" className="btn mt-5">Health details &amp; waiver</Link>
       </div>
     );
   }
