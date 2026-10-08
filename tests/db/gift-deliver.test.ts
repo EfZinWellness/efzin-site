@@ -196,6 +196,7 @@ describe("delivery from the webhook", () => {
     expect(sent.map((s) => [s.kind, s.to])).toEqual([
       ["gift_card_delivered", "noor@example.com"],
       ["gift_card_delivered_buyer", "layla@example.com"],
+      ["gift_card_bought", "layla@example.com"],
     ]);
     const card = sent[0];
     expect(card.data).toMatchObject({
@@ -218,7 +219,7 @@ describe("delivery from the webhook", () => {
 
   it("does not deliver a card scheduled for a later day", async () => {
     await buyAndPay({ deliverOn: "2027-02-01" });
-    expect(sent).toEqual([]);
+    expect(sent.map((s) => s.kind)).toEqual(["gift_card_bought"]); // the receipt only
     expect(await q("select 1 from gift_cards where delivered_at is null and status = 'active'")).toHaveLength(1);
   });
 
@@ -263,9 +264,94 @@ describe("delivery from the webhook", () => {
   });
 });
 
+describe("buyer receipt for single gifts", () => {
+  it("sends a future-dated gift's receipt once, even when the webhook is retried with a new event id", async () => {
+    const { wh } = await buyAndPay({ deliverOn: "2027-02-01", suggestedSlug: "test-event" });
+    expect(sent.map((s) => [s.kind, s.to])).toEqual([["gift_card_bought", "layla@example.com"]]);
+    const r = sent[0];
+    expect(r.data).toMatchObject({
+      buyerName: "Layla",
+      value: "AED 500",
+      recipientLabel: "Noor",
+      deliverOn: "1 February 2027",
+    });
+    expect(String(r.data.codeMasked)).toMatch(/^EFZG-••••-[A-Z2-9]{4}$/);
+    const code = (await q<{ code: string }>("select code from gift_cards"))[0].code;
+    expect(String(r.data.codeMasked).slice(-4)).toBe(code.slice(-4));
+    expect(JSON.stringify(r.data)).not.toContain(code);
+    expect(r.attachments).toBeUndefined();
+
+    await handleStripeEvent(
+      event("evt_new_id", "checkout.session.completed", {
+        object: "checkout.session",
+        id: "cs_test_1",
+        mode: "payment",
+        payment_status: "paid",
+        metadata: { kind: "gift_purchase", batch_id: stripe.sessions[0].metadata!.batch_id },
+        payment_intent: "pi_1",
+        amount_total: 10500,
+        currency: "gbp",
+      }),
+      wh,
+    );
+    expect(sent).toHaveLength(1);
+  });
+
+  it("puts the receipt back when sending it fails, so a retry sends it", async () => {
+    const { wh } = await buyAndPay({ deliverOn: "2027-02-01" });
+    sent.length = 0;
+    await db.query("update gift_cards set buyer_receipt_sent_at = null");
+    const failing = async () => {
+      throw new Error("down");
+    };
+    await handleStripeEvent(
+      event("evt_f", "checkout.session.completed", {
+        object: "checkout.session",
+        id: "cs_test_1",
+        mode: "payment",
+        payment_status: "paid",
+        metadata: { kind: "gift_purchase", batch_id: stripe.sessions[0].metadata!.batch_id },
+        payment_intent: "pi_1",
+        amount_total: 10500,
+        currency: "gbp",
+      }),
+      { ...wh, sendEmail: failing },
+    );
+    expect(await q("select 1 from gift_cards where buyer_receipt_sent_at is null")).toHaveLength(1);
+  });
+
+  it("send-to-me delivered today is one email, carrying the receipt wording", async () => {
+    await buyAndPay({ sendTo: "me", recipientName: undefined, recipientEmail: undefined });
+    expect(sent.map((s) => s.kind)).toEqual(["gift_card_delivered"]);
+    expect(sent[0].data.receipt).toBe(true);
+    expect(await q("select 1 from gift_cards where buyer_receipt_sent_at is not null")).toHaveLength(1);
+  });
+
+  it("a gift to a friend delivered today gets the receipt as well as the delivery emails", async () => {
+    await buyAndPay();
+    expect(sent.map((s) => s.kind).sort()).toEqual(["gift_card_bought", "gift_card_delivered", "gift_card_delivered_buyer"]);
+  });
+
+  it("bulk keeps its single gift_card_bought email (no extra receipt)", async () => {
+    await buyAndPay({ quantity: 2, amountAedMinor: 25000 }, 21000);
+    expect(sent.map((s) => s.kind)).toEqual(["gift_card_bought"]);
+    expect(Array.isArray(sent[0].data.codes)).toBe(true);
+  });
+
+  it("delivery email mentions the printable card only when a PDF is attached", async () => {
+    const { renderGiftEmail } = await import("../../lib/email/giftEmails");
+    const base = { recipientName: "Noor", code: "EFZG-AAAA-BBBB", value: "AED 500", expiresOn: "2028-01-10", bookUrl: "x" };
+    expect(renderGiftEmail("gift_card_delivered", { ...base, hasPdf: true }).text).toContain("printable card is attached");
+    const without = renderGiftEmail("gift_card_delivered", { ...base, hasPdf: false });
+    expect(without.text).not.toContain("printable");
+    expect(without.html).not.toContain("printable");
+  });
+});
+
 describe("deliverDueGiftCards", () => {
   it("sends only due cards, once", async () => {
     await buyAndPay({ deliverOn: "2027-02-01" });
+    sent.length = 0;
     const d = { sendEmail, origin: ORIGIN };
     expect(await deliverDueGiftCards(db, new Date("2027-01-31T19:59:00Z"), d)).toBe(0); // 31 Jan in Dubai
     expect(await deliverDueGiftCards(db, new Date("2027-01-31T20:00:00Z"), d)).toBe(1); // 1 Feb in Dubai

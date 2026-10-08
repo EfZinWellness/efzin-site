@@ -37,6 +37,8 @@ function delivered(d: Record<string, unknown>): { subject: string; text: string;
   const suggested = str(d.suggested);
   const estimate = str(d.estimate);
   const value = str(d.value);
+  const hasPdf = d.hasPdf === true;
+  const receipt = d.receipt === true;
   const subject = buyer && buyer !== to ? `${buyer} sent you an Ef Zin gift card` : "Your Ef Zin gift card";
   const lines = [
     to ? `Dear ${to},` : "Hello,",
@@ -47,7 +49,8 @@ function delivered(d: Record<string, unknown>): { subject: string; text: string;
     ...(suggested ? [`Suggested experience: ${suggested}`] : []),
     `Valid until ${str(d.expiresOn)}. It can be spent on any Ef Zin event or retreat.`,
     `Book with your gift: ${str(d.bookUrl)}`,
-    "A printable card is attached.",
+    ...(hasPdf ? ["A printable card is attached."] : []),
+    ...(receipt ? ["Thank you for your purchase."] : []),
   ];
   const html = shell(`
 <p style="margin:0;font-size:22px">${to ? `Dear ${esc(to)}` : "Hello"}</p>
@@ -61,7 +64,8 @@ ${codeBox(str(d.code))}
 ${suggested ? `<p style="margin:0;font-size:14px">Suggested: ${esc(suggested)}</p>` : ""}
 <p style="margin:12px 0 0;font-size:13px;color:#6E6F5E;font-family:Arial,sans-serif">Valid until ${esc(str(d.expiresOn))}. Spend it on any Ef Zin event or retreat.</p>
 ${button(str(d.bookUrl), "Book with your gift")}
-<p style="margin:0;font-size:12px;color:#6E6F5E;font-family:Arial,sans-serif">A printable card is attached.</p>`);
+${hasPdf ? `<p style="margin:0;font-size:12px;color:#6E6F5E;font-family:Arial,sans-serif">A printable card is attached.</p>` : ""}
+${receipt ? `<p style="margin:16px 0 0;font-size:14px">Thank you for your purchase.</p>` : ""}`);
   return { subject, text: lines.join("\n\n"), html };
 }
 
@@ -75,7 +79,30 @@ function deliveredBuyer(d: Record<string, unknown>): { subject: string; text: st
   return { subject: "Your Ef Zin gift has been delivered", text, html };
 }
 
+/** Receipt for a single gift: value, who it is for, when it goes out, and a masked card preview. */
+function receiptEmail(d: Record<string, unknown>): { subject: string; text: string; html: string } {
+  const buyer = str(d.buyerName);
+  const who = str(d.recipientLabel) || "you";
+  const text = [
+    buyer ? `Dear ${buyer},` : "Hello,",
+    `Thank you for your purchase. Your ${str(d.value)} Ef Zin gift card for ${who} will be emailed on ${str(d.deliverOn)}.`,
+    `Card: ${str(d.codeMasked)}`,
+    "The full code is sent with the card on the delivery date.",
+  ].join("\n\n");
+  const html = shell(`
+<p style="margin:0;font-size:22px">Thank you for your purchase</p>
+<p style="margin:12px 0 0;font-size:15px;line-height:1.6">${buyer ? `Dear ${esc(buyer)}, your` : "Your"} ${esc(str(d.value))} gift card for ${esc(who)} will be emailed on ${esc(str(d.deliverOn))}.</p>
+<div style="margin:24px auto;max-width:320px;padding:20px;background:${NAVY};color:${IVORY}">
+<p style="margin:0;font-size:12px;letter-spacing:4px;text-transform:uppercase">Ef Zin gift card</p>
+<p style="margin:12px 0 0;font-size:28px">${esc(str(d.value))}</p>
+<p style="margin:12px 0 0;font-family:'Courier New',monospace;font-size:16px;letter-spacing:2px">${esc(str(d.codeMasked))}</p>
+</div>
+<p style="margin:0;font-size:12px;color:#6E6F5E;font-family:Arial,sans-serif">The full code is sent with the card on the delivery date.</p>`);
+  return { subject: "Thank you for your Ef Zin gift card purchase", text, html };
+}
+
 function bought(d: Record<string, unknown>): { subject: string; text: string; html: string } {
+  if (!Array.isArray(d.codes)) return receiptEmail(d);
   const codes = Array.isArray(d.codes) ? (d.codes as unknown[]).map(String) : [];
   const buyer = str(d.buyerName);
   const subject = `Your Ef Zin gift cards (${codes.length})`;

@@ -1,7 +1,7 @@
 import type { SqlClient } from "../content/sync";
 import type { SendEmailFn } from "../email/send";
 import { activateGiftCards } from "./db";
-import { deliverDueGiftCards } from "./deliver";
+import { deliverDueGiftCards, sendBuyerReceipts } from "./deliver";
 
 export interface GiftActivatedDeps {
   sendEmail: SendEmailFn;
@@ -17,7 +17,10 @@ export interface GiftActivatedDeps {
  * twice (deliverDueGiftCards claims each card before sending).
  */
 export async function onGiftCardsActivated(db: SqlClient, paymentIntent: string, deps: GiftActivatedDeps): Promise<void> {
-  await deliverDueGiftCards(db, deps.now ?? new Date(), deps, { paymentIntent });
+  const now = deps.now ?? new Date();
+  // Delivery first: a send-to-me gift delivered today carries the receipt wording itself.
+  await deliverDueGiftCards(db, now, deps, { paymentIntent });
+  await sendBuyerReceipts(db, now, deps, paymentIntent);
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
