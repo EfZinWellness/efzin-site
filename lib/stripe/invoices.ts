@@ -39,6 +39,10 @@ type Item = {
  *   item stays `scheduled` until `invoice.paid`. A finalized pay-by-link invoice found on a later
  *   run is sent again with the same idempotency key (a no-op within Stripe's 24-hour window).
  *
+ * `first_attempted_at` is set (once) only when the charge got an answer from Stripe (paid or
+ * declined) or the pay link was sent; an invoice left unfinished by an error is not an attempt,
+ * and the daily job's catch-up resumes it.
+ *
  * `now` is the caller's clock (the daily job's run time); nothing here reads the system clock, so
  * a retried create sends identical parameters under its idempotency key.
  *
@@ -66,6 +70,14 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
     return { status: "skipped" };
   }
   const key = (step: string) => ({ idempotencyKey: `efzin-item-${itemId}-${step}` });
+  // The first real attempt: Stripe answered the charge (paid or declined) or the pay link went out.
+  const attempted = async (res: ChargeResult): Promise<ChargeResult> => {
+    await db.query("update payment_schedule_items set first_attempted_at = coalesce(first_attempted_at, $2) where id = $1", [
+      itemId,
+      now.toISOString(),
+    ]);
+    return res;
+  };
 
   let invoiceId = item.stripe_invoice_id;
   let collection: Stripe.Invoice.CollectionMethod;
@@ -76,9 +88,9 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
     if (inv.status === "open") {
       // Finalized but never paid by us (e.g. stopped before pay). Failed items are Stripe's to retry;
       // pay-by-link invoices are the guest's to pay (make sure the link went out).
-      if (collection === "send_invoice" && item.status === "scheduled") return send(stripe, invoiceId, key);
+      if (collection === "send_invoice" && item.status === "scheduled") return attempted(await send(stripe, invoiceId, key));
       if (collection !== "charge_automatically" || item.status !== "scheduled") return { status: "skipped" };
-      return pay(stripe, invoiceId, key);
+      return attempted(await pay(stripe, invoiceId, key));
     }
     if (inv.status !== "draft") return { status: "skipped" };
     if (inv.total !== 0 && inv.total !== item.amount_minor) {
@@ -108,12 +120,10 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
       key("invoice"),
     );
     invoiceId = created.id;
-    await db.query(
-      `update payment_schedule_items
-          set stripe_invoice_id = $2, first_attempted_at = coalesce(first_attempted_at, $3)
-        where id = $1 and stripe_invoice_id is null`,
-      [itemId, invoiceId, now.toISOString()],
-    );
+    await db.query("update payment_schedule_items set stripe_invoice_id = $2 where id = $1 and stripe_invoice_id is null", [
+      itemId,
+      invoiceId,
+    ]);
     needsLine = true;
   }
 
@@ -132,8 +142,8 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
     );
   }
   await stripe.invoices.finalizeInvoice(invoiceId, { auto_advance: true }, key("finalize"));
-  if (collection !== "charge_automatically") return send(stripe, invoiceId, key);
-  return pay(stripe, invoiceId, key);
+  if (collection !== "charge_automatically") return attempted(await send(stripe, invoiceId, key));
+  return attempted(await pay(stripe, invoiceId, key));
 }
 
 /** Emails a finalized pay-by-link invoice to the guest (Stripe's hosted pay page). */

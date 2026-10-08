@@ -208,6 +208,78 @@ describe("daily job: unpaid at the balance due date", () => {
     expect(chargedItems()).toHaveLength(1);
   });
 
+  const attemptedAt = async (itemId: string) =>
+    (await w.db.query<{ t: string | null }>("select first_attempted_at::text as t from payment_schedule_items where id = $1", [itemId]))
+      .rows[0].t;
+
+  it("an invoice left unfinished by a Stripe 5xx on the due date is not an attempt: kept at due+2 and resumed by catch-up", async () => {
+    savedCard("cus_a");
+    const b = await plan("amal@x.com", "cus_a", [{ seq: 1, dueOn: "2027-05-31", amount: 192000, status: "scheduled" }]);
+    w.stripe.invoiceItemError = Object.assign(new Error("api down"), { type: "StripeAPIError", statusCode: 500 });
+    await runDaily(w.db, at("2027-05-31"), deps);
+    expect(w.stripe.invoiceStatus.in_test_1).toBe("draft");
+    expect(await attemptedAt(b.itemIds[1])).toBeNull();
+
+    await runDaily(w.db, at("2027-06-02"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("deposit_paid");
+    expect(w.stripe.invoicesCreated).toHaveLength(1);
+    expect(w.stripe.invoicePaid).toEqual(["in_test_1"]);
+    expect(await attemptedAt(b.itemIds[1])).not.toBeNull();
+  });
+
+  it("a pay link whose send failed is not an attempt: resumed and sent on the next run", async () => {
+    const b = await plan("amal@x.com", "cus_a", [{ seq: 1, dueOn: "2027-05-31", amount: 192000, status: "scheduled" }]);
+    w.stripe.sendInvoiceError = Object.assign(new Error("api down"), { type: "StripeAPIError", statusCode: 503 });
+    await runDaily(w.db, at("2027-05-31"), deps);
+    expect(w.stripe.invoicesSent).toEqual([]);
+    expect(await attemptedAt(b.itemIds[1])).toBeNull();
+
+    await runDaily(w.db, at("2027-06-01"), deps);
+    expect(w.stripe.invoicesSent.map((s) => s.id)).toEqual(["in_test_1"]);
+    expect(await attemptedAt(b.itemIds[1])).not.toBeNull();
+    await runDaily(w.db, at("2027-06-02"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("deposit_paid");
+    expect(w.stripe.invoicesCreated).toHaveLength(1);
+  });
+
+  it("a card decline on the due date is an attempt: cancelled at due+2", async () => {
+    savedCard("cus_a");
+    w.stripe.payError = Object.assign(new Error("declined"), { type: "StripeCardError" });
+    const b = await plan("amal@x.com", "cus_a", [{ seq: 1, dueOn: "2027-05-31", amount: 192000, status: "scheduled" }]);
+    await runDaily(w.db, at("2027-05-31"), deps);
+    expect(await attemptedAt(b.itemIds[1])).not.toBeNull();
+    await runDaily(w.db, at("2027-06-01"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("deposit_paid");
+    await runDaily(w.db, at("2027-06-02"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("cancelled");
+    expect(w.stripe.invoicesCreated).toHaveLength(1);
+  });
+
+  it("an attempted item next to a never-attempted one blocks cancellation", async () => {
+    const b = await plan("amal@x.com", "cus_a", [
+      { seq: 1, dueOn: "2027-05-01", amount: 96000, status: "failed", invoice: "in_old" },
+      { seq: 2, dueOn: "2027-05-31", amount: 96000, status: "scheduled" },
+    ]);
+    w.stripe.invoiceStatus.in_old = "open";
+    await runDaily(w.db, at("2027-06-05"), { ...deps, stripe: null });
+    expect(await status("bookings", b.bookingId)).toBe("deposit_paid");
+  });
+
+  it("cancellations without the unpaid-balance reason are never mailed as unpaid", async () => {
+    const b = await seedBooking(w.db, {
+      slug: "test-retreat",
+      status: "cancelled",
+      booker: { name: "Amal A", email: "amal@x.com" },
+      items: [
+        { seq: 0, dueOn: "2027-01-10", amount: 48000, status: "paid" },
+        { seq: 1, dueOn: "2027-05-31", amount: 192000, status: "cancelled" },
+      ],
+    });
+    await w.db.query("update bookings set cancelled_by = 'guest', cancelled_at = $2 where id = $1", [b.bookingId, "2027-06-01T02:00:00Z"]);
+    await runDaily(w.db, at("2027-06-02"), deps);
+    expect(sent.filter((s) => s.kind === "booking_cancelled_unpaid")).toEqual([]);
+  });
+
   it("the booking's agreed schedule governs, not the experience date (experience moved earlier)", async () => {
     const b = await attemptedAndFailed();
     await w.db.query("update experiences set start_at = '2027-05-20T07:00:00Z' where slug = 'test-retreat'");

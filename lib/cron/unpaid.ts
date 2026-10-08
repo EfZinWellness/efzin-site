@@ -48,7 +48,7 @@ function moneyBack(b: BookingFacts, at: Date): CancelOption[] {
 /**
  * Spec §6.3/§9, per the booking's own agreed schedule: a part-paid booking is cancelled (a guest
  * default) only when every unpaid instalment is past due, every one of them was actually
- * attempted (invoiced, or failed), and for each of them UNPAID_GRACE_DAYS have passed since the
+ * attempted (charged with an answer from Stripe, pay link sent, or failed), and for each of them UNPAID_GRACE_DAYS have passed since the
  * later of its due date and its first charge attempt (Dubai dates). Never-attempted items are charged late by chargeDueItems instead. Cancelling cancels the
  * unpaid items (never charged afterwards), voids open invoices and frees the spots; money back
  * follows the policy (none at 10 days before a retreat). The notices go out from
@@ -65,7 +65,7 @@ export async function cancelUnpaidBookings(ctx: JobContext, stripe: StripeApi | 
       where b.status = 'deposit_paid'
       group by b.id, p.id, e.id
      having bool_and(i.due_on < $1::date)
-        and bool_and(i.stripe_invoice_id is not null or i.status = 'failed')
+        and bool_and(i.first_attempted_at is not null or i.status = 'failed')
         and bool_and(greatest(i.due_on, coalesce(((i.first_attempted_at at time zone 'UTC') + interval '4 hours')::date, i.due_on))
                      + $2::int <= $1::date)
       order by b.created_at`,

@@ -84,9 +84,9 @@ function errorCode(err: unknown): string {
 
 /**
  * Collects the instalments due today (Dubai date) on part-paid bookings, through
- * chargeScheduledItem. With `catchUp`, items from earlier days that were never invoiced (a missed
- * run, a Stripe outage) are collected late too; items already invoiced earlier are left to
- * Stripe's retries and the guest's pay link. A failing item never stops the others; failures
+ * chargeScheduledItem. With `catchUp`, items from earlier days that were never attempted (a missed
+ * run, or an invoice left unfinished by a Stripe error) are collected late too, resuming any
+ * unfinished invoice; attempted items are left to Stripe's retries and the guest's pay link. A failing item never stops the others; failures
  * are emailed to Tanya once per run per error code, listing the items.
  */
 export async function chargeDueItems(ctx: JobContext, stripe: StripeApi | null, opts: { catchUp: boolean }): Promise<number> {
@@ -95,7 +95,9 @@ export async function chargeDueItems(ctx: JobContext, stripe: StripeApi | null, 
     `select i.id, i.booking_id
        from payment_schedule_items i join bookings b on b.id = i.booking_id
       where b.status = 'deposit_paid' and i.status in ('scheduled', 'failed') and i.seq > 0 and i.amount_minor > 0
-        and (i.due_on = $1::date or ($2 and i.due_on < $1::date and i.stripe_invoice_id is null))
+        and (i.due_on = $1::date
+             or ($2 and i.due_on < $1::date
+                 and (i.stripe_invoice_id is null or (i.status = 'scheduled' and i.first_attempted_at is null))))
       order by b.created_at, i.seq`,
     [today, opts.catchUp],
   );
