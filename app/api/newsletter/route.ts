@@ -1,11 +1,14 @@
 import { getSqlClient } from "@/lib/db/client";
+import { guardPost } from "@/lib/requests/guard";
 import { handleNewsletter } from "@/lib/requests/handlers";
 
 export async function POST(req: Request) {
+  const guarded = await guardPost(req, "newsletter");
+  if (guarded instanceof Response) return guarded;
   const isJson = (req.headers.get("content-type") ?? "").includes("application/json");
   let body: unknown;
   try {
-    body = isJson ? await req.json() : Object.fromEntries(await req.formData());
+    body = isJson ? JSON.parse(guarded.text) : Object.fromEntries(new URLSearchParams(guarded.text));
   } catch {
     return Response.json({ ok: false, error: "Invalid body" }, { status: 400 });
   }

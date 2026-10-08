@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { guardPost } from "../../lib/requests/guard";
+import { resetThrottleForTests } from "../../lib/requests/throttle";
 import { RequestSchema } from "../../lib/requests/schema";
 import { handleRequest, handleNewsletter } from "../../lib/requests/handlers";
 import { redirects } from "../../redirects";
@@ -177,5 +179,86 @@ describe("sendEmail", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     await expect(sendEmail("admin_error", "x@x.com", {})).resolves.toBeUndefined();
     expect(info).toHaveBeenCalled();
+  });
+});
+describe("input caps", () => {
+  const base = { type: "retreat_interest", name: "A", email: "a@b.co" };
+  const ok = (o: Record<string, unknown>) => RequestSchema.safeParse({ ...base, ...o }).success;
+  it("rejects oversized fields", () => {
+    expect(ok({ name: "x".repeat(121) })).toBe(false);
+    expect(ok({ email: "a".repeat(250) + "@b.co" })).toBe(false);
+    expect(ok({ phone: "1".repeat(41) })).toBe(false);
+    expect(ok({ howHeard: "x".repeat(201) })).toBe(false);
+    expect(ok({ slug: "a".repeat(121) })).toBe(false);
+    expect(ok({ groupSize: 501 })).toBe(false);
+    expect(ok({ groupSize: 0 })).toBe(false);
+    expect(ok({ groupSize: 500, name: "x".repeat(120) })).toBe(true);
+  });
+  it("caps corporate arrays, items and preferred dates", () => {
+    const bad = (o: Record<string, unknown>) => RequestSchema.safeParse({ ...corporate, ...o }).success;
+    expect(bad({ goals: Array(21).fill("a") })).toBe(false);
+    expect(bad({ goals: ["x".repeat(81)] })).toBe(false);
+    expect(bad({ teamSize: 501 })).toBe(false);
+    expect(bad({ company: "x".repeat(121) })).toBe(false);
+    expect(bad({ invoiceContact: "x".repeat(121) })).toBe(false);
+    expect(bad({ preferredDates: "x".repeat(201) })).toBe(false);
+    expect(bad({ preferredDates: "March" })).toBe(true);
+  });
+  it("caps the newsletter name", async () => {
+    const r = await handleNewsletter({ name: "x".repeat(121), email: "a@b.co" }, { db: null });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe("honeypot", () => {
+  it("silently succeeds without storing or emailing", async () => {
+    const { db, calls } = fakeDb();
+    const send = vi.fn();
+    const r = await handleRequest({ ...corporate, website: "http://spam" }, { db, sendEmail: send });
+    expect(r).toEqual({ status: 200, body: { ok: true, stored: false } });
+    expect(calls).toHaveLength(0);
+    expect(send).not.toHaveBeenCalled();
+    const n = await handleNewsletter({ email: "a@b.co", website: "x" }, { db });
+    expect(n.body).toEqual({ ok: true, stored: false });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("lost enquiries", () => {
+  it("emails admin_error with the enquiry when the DB write fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const db: SqlClient = { query: () => Promise.reject(new Error("down")) };
+    const send = vi.fn().mockResolvedValue(undefined);
+    const r = await handleRequest(corporate, { db, sendEmail: send });
+    expect(r.status).toBe(500);
+    expect(send).toHaveBeenCalledWith(
+      "admin_error",
+      expect.any(String),
+      expect.objectContaining({ type: "corporate", name: "Nadia Haddad", email: "nadia@acme.com", company: "Acme" }),
+    );
+  });
+});
+
+describe("guardPost", () => {
+  beforeEach(() => resetThrottleForTests());
+  const post = (body: string, headers: Record<string, string> = {}) =>
+    new Request("http://x/api", { method: "POST", body, headers });
+
+  it("returns the body text for a normal request", async () => {
+    expect(await guardPost(post("{}"), "t")).toEqual({ text: "{}" });
+  });
+  it("413s on a large declared content-length", async () => {
+    const g = await guardPost(post("{}", { "content-length": "40000" }), "t");
+    expect((g as Response).status).toBe(413);
+  });
+  it("413s on a large actual body", async () => {
+    const g = await guardPost(post("x".repeat(33 * 1024)), "t");
+    expect((g as Response).status).toBe(413);
+  });
+  it("429s after 5 requests per 10 minutes per IP, and is per IP", async () => {
+    const h = { "x-forwarded-for": "1.2.3.4, 9.9.9.9" };
+    for (let i = 0; i < 5; i++) expect(await guardPost(post("{}", h), "t")).toEqual({ text: "{}" });
+    expect(((await guardPost(post("{}", h), "t")) as Response).status).toBe(429);
+    expect(await guardPost(post("{}", { "x-forwarded-for": "5.6.7.8" }), "t")).toEqual({ text: "{}" });
   });
 });

@@ -80,6 +80,7 @@ export default function EnquiryForm({ type, slug }: { type: Kind; slug?: string 
       email: text("email"),
       phone: text("phone"),
       notes: text("notes"),
+      website: text("website"),
     };
     if (bespoke) {
       const amount = num("budgetAmount");
@@ -93,6 +94,7 @@ export default function EnquiryForm({ type, slug }: { type: Kind; slug?: string 
         accommodation: text("accommodation"),
         budget: amount ? { amount, currency: text("budgetCurrency") ?? "AED", basis: text("budgetBasis") ?? "total" } : undefined,
         links: text("links"),
+        preferredDates: text("preferredDates"),
       });
     }
     if (type === "corporate") {
@@ -134,6 +136,9 @@ export default function EnquiryForm({ type, slug }: { type: Kind; slug?: string 
 
   return (
     <form onSubmit={onSubmit} className="text-left" aria-label="Enquiry form">
+      <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
+        <label>Website<input name="website" tabIndex={-1} autoComplete="off" /></label>
+      </div>
       <Field id={`${uid}-name`} text="Your name">
         <input id={`${uid}-name`} name="name" required autoComplete="name" className={input} />
       </Field>
@@ -204,6 +209,9 @@ export default function EnquiryForm({ type, slug }: { type: Kind; slug?: string 
               <option value="abroad_multi_day">Greece or abroad, several days</option>
               <option value="flexible">Flexible dates</option>
             </select>
+          </Field>
+          <Field id={`${uid}-dates`} text="Preferred dates (optional)">
+            <input id={`${uid}-dates`} name="preferredDates" maxLength={200} placeholder="e.g. a weekend in March" className={input} />
           </Field>
           {type === "private" ? (
             <Field id={`${uid}-size`} text="Group size">

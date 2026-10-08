@@ -14,6 +14,7 @@ export type Person = {
   how_heard: string | null;
   marketing_consent: boolean;
   marketing_consent_at: string | null;
+  marketing_consent_withdrawn_at: string | null;
   notes: string | null;
   created_at: string;
   imported_from: "squarespace" | null;
