@@ -50,8 +50,8 @@ export interface SeedItem {
 export interface SeedBooking {
   slug: "test-retreat" | "test-event";
   status: "paid" | "deposit_paid" | "cancelled" | "refunded";
-  booker: { name: string; email: string; customer?: string; detailsComplete?: boolean };
-  guests?: { name: string; email: string; detailsComplete?: boolean }[];
+  booker: { name: string; email: string; customer?: string; detailsComplete?: boolean; checkedIn?: boolean };
+  guests?: { name: string; email: string; detailsComplete?: boolean; checkedIn?: boolean }[];
   items?: SeedItem[];
   createdAt?: string;
 }
@@ -87,15 +87,18 @@ export async function seedBooking(db: PGlite, s: SeedBooking): Promise<{ booking
     ],
   );
   const bookingId = b.rows[0].id;
+  const checkedIn = (on?: boolean) => (on ? "2027-02-01T07:00:00Z" : null);
   await db.query(
-    "insert into booking_guests (booking_id, person_id, ticket_type_id, is_booker, details_complete) values ($1, $2, $3, true, $4)",
-    [bookingId, booker, exp.tt, s.booker.detailsComplete ?? false],
+    `insert into booking_guests (booking_id, person_id, ticket_type_id, is_booker, details_complete, checked_in_at)
+     values ($1, $2, $3, true, $4, $5)`,
+    [bookingId, booker, exp.tt, s.booker.detailsComplete ?? false, checkedIn(s.booker.checkedIn)],
   );
   for (const g of s.guests ?? []) {
     const pid = await person(db, g.name, g.email);
     await db.query(
-      "insert into booking_guests (booking_id, person_id, ticket_type_id, is_booker, details_complete) values ($1, $2, $3, false, $4)",
-      [bookingId, pid, exp.tt, g.detailsComplete ?? false],
+      `insert into booking_guests (booking_id, person_id, ticket_type_id, is_booker, details_complete, checked_in_at)
+       values ($1, $2, $3, false, $4, $5)`,
+      [bookingId, pid, exp.tt, g.detailsComplete ?? false, checkedIn(g.checkedIn)],
     );
   }
   const itemIds: Record<number, string> = {};

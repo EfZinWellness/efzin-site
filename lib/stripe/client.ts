@@ -31,6 +31,9 @@ export interface StripeApi {
   paymentIntents: {
     retrieve(id: string): Promise<{ id: string; payment_method: PaymentMethodRef }>;
   };
+  paymentMethods: {
+    retrieve(id: string): Promise<{ id: string; card?: { last4: string } | null }>;
+  };
   setupIntents: {
     retrieve(id: string): Promise<{ id: string; payment_method: PaymentMethodRef }>;
   };

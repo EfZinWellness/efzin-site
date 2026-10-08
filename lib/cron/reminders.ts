@@ -1,12 +1,18 @@
+import type { Experience } from "../content/schema";
 import { dubaiToday } from "../giftcards/dates";
 import { calendarDate } from "../payments/schedule";
+import { REVIEW_URL } from "../site";
 import { addDays, daysBetween, endOfDubaiDay, mail, type JobContext } from "./context";
+
+/** Loads the content-file details of an experience (null when unknown). */
+export type ExperienceInfo = (slug: string) => Promise<Pick<Experience, "venue" | "schedule"> | null>;
 
 type GuestRow = {
   guest_id: string;
   name: string;
   email: string;
   details_complete: boolean;
+  checked_in: boolean;
   title: string;
   slug: string;
   type: string;
@@ -35,12 +41,37 @@ async function upcoming(ctx: JobContext, limit: number) {
 
 /**
  * Guest emails around an experience, by calendar day in the experience's timezone:
- * `details_reminder` 3 days before (details incomplete), `day_before` to every guest, and
- * `day_after` the day after it ends. Only guests on paid or part-paid bookings; once per guest.
+ * `details_reminder` 3 days before (details incomplete), `day_before` to every guest (venue,
+ * address, map link and timing from the content file when `info` is given), and `day_after`
+ * the day after it ends to checked-in attendees, with the review link. Only guests on paid or
+ * part-paid bookings; once per guest.
  */
-export async function remindGuests(ctx: JobContext): Promise<number> {
+export async function remindGuests(ctx: JobContext, info?: ExperienceInfo): Promise<number> {
+  const details = new Map<string, Record<string, unknown>>();
+  const contentFor = async (slug: string): Promise<Record<string, unknown>> => {
+    if (!info) return {};
+    if (!details.has(slug)) {
+      let found: Record<string, unknown> = {};
+      try {
+        const e = await info(slug);
+        if (e) {
+          found = {
+            venue: e.venue.name,
+            ...(e.venue.address ? { address: e.venue.address } : {}),
+            ...(e.venue.mapUrl ? { mapUrl: e.venue.mapUrl } : {}),
+            timings: e.schedule.map((s) => `${s.time} ${s.label}`),
+          };
+        }
+      } catch (err) {
+        console.error(`[cron] could not load content for ${slug}`, err);
+      }
+      details.set(slug, found);
+    }
+    return details.get(slug)!;
+  };
   const r = await ctx.db.query<GuestRow>(
-    `select g.id as guest_id, p.name, p.email, g.details_complete, e.title, e.slug, e.type, e.start_at, e.end_at,
+    `select g.id as guest_id, p.name, p.email, g.details_complete, g.checked_in_at is not null as checked_in,
+            e.title, e.slug, e.type, e.start_at, e.end_at,
             e.timezone, e.venue
        from booking_guests g
        join bookings b on b.id = g.booking_id
@@ -70,17 +101,23 @@ export async function remindGuests(ctx: JobContext): Promise<number> {
       n++;
     }
     if (untilStart === 1) {
-      await mail(ctx, "day_before", g.email, { ...base, venue: g.venue, experienceUrl: pageOf(ctx.origin, g.type, g.slug) }, g.guest_id);
+      await mail(
+        ctx,
+        "day_before",
+        g.email,
+        { ...base, venue: g.venue, ...(await contentFor(g.slug)), experienceUrl: pageOf(ctx.origin, g.type, g.slug) },
+        g.guest_id,
+      );
       n++;
     }
-    if (daysBetween(today, endDay) === 1) {
+    if (daysBetween(today, endDay) === 1 && g.checked_in) {
       next ??= await upcoming(ctx, 1);
       const nx = next[0];
       await mail(
         ctx,
         "day_after",
         g.email,
-        { ...base, ...(nx ? { nextTitle: nx.title, nextUrl: nx.url, nextStartsAt: nx.startsAt, nextTimezone: nx.timezone } : {}) },
+        { ...base, reviewUrl: REVIEW_URL, ...(nx ? { nextTitle: nx.title, nextUrl: nx.url, nextStartsAt: nx.startsAt, nextTimezone: nx.timezone } : {}) },
         g.guest_id,
       );
       n++;

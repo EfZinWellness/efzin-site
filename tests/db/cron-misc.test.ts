@@ -6,7 +6,7 @@ import { activateGiftCards, issueGiftCards } from "../../lib/giftcards/db";
 import { policyCopy } from "../../lib/policy/copy";
 import type { EmailAttachment } from "../../lib/email/send";
 import { captureEmails, kinds, person, type Captured } from "./cronFixtures";
-import { checkout, count, EVENT, giftCard, NOW, ORIGIN, planBooking, completedBooking, world, type World } from "./webhookFixtures";
+import { checkout, count, EVENT, giftCard, NOW, ORIGIN, planBooking, completedBooking, RETREAT, world, type World } from "./webhookFixtures";
 import { handleStripeEvent } from "../../lib/stripe/handlers";
 
 const ADMIN = "contact@efzinwellness.com";
@@ -91,7 +91,7 @@ describe("hourly job", () => {
     expect(sent).toEqual([]);
   });
 
-  it("removes gift cards still awaiting payment after 24 hours, never active ones", async () => {
+  it("removes gift cards still awaiting payment after 25 hours, never active ones", async () => {
     const buyer = await person(w.db, "Mona M", "mona@x.com");
     const now = new Date("2027-01-10T09:00:00Z");
     const issue = (ref: string, n = 1) =>
@@ -103,7 +103,8 @@ describe("hourly job", () => {
     await activateGiftCards(w.db, "pi_active", now);
     await w.db.query("update gift_cards set created_at = $1", ["2027-01-08T09:00:00Z"]);
     await w.db.query("update gift_card_batches set created_at = $1", ["2027-01-08T09:00:00Z"]);
-    await w.db.query("update gift_cards set created_at = $2 where id = $1", [fresh.id, "2027-01-10T08:00:00Z"]);
+    // 24.5 hours old: within the 25-hour allowance.
+    await w.db.query("update gift_cards set created_at = $2 where id = $1", [fresh.id, "2027-01-09T08:30:00Z"]);
 
     await runHourly(w.db, now, { sendEmail: send });
     const left = (await w.db.query<{ id: string }>("select id from gift_cards order by created_at")).rows.map((r) => r.id).sort();
@@ -149,6 +150,24 @@ describe("booking confirmation emails", () => {
     const ics = conf.attachments![0];
     expect(ics).toMatchObject({ filename: "ef-zin-test-retreat.ics", contentType: "text/calendar; charset=utf-8; method=PUBLISH" });
     expect(String(ics.content)).toContain("DTSTART:20270610T070000Z");
+  });
+
+  it("say whether instalments are charged to the saved card or paid by emailed link", async () => {
+    await planBooking(w);
+    expect(got.find((g) => g.kind === "booking_confirmed")!.data.payByLink).toBe(false);
+
+    const w2 = await world();
+    const got2: Got[] = [];
+    w2.deps.sendEmail = async (kind, to, data) => {
+      got2.push({ kind, to, data });
+    };
+    const { pendingId, sessionId } = await checkout(w2, RETREAT, {
+      lines: [{ ticketKey: "shared", qty: 1 }],
+      paymentOption: "deposit_balance",
+      scheduleConsent: true,
+    });
+    await handleStripeEvent(completedBooking("evt_nocard", pendingId, sessionId, { customer: null }), w2.deps);
+    expect(got2.find((g) => g.kind === "booking_confirmed")!.data.payByLink).toBe(true);
   });
 
   it("tell the holder how much of their gift card was used and what is left", async () => {

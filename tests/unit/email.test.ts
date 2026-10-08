@@ -190,6 +190,42 @@ describe("email templates", () => {
     expect(r.html).not.toContain("javascript:");
   });
 
+  it("booking_confirmed tells pay-by-link guests they'll get a secure link for each instalment", async () => {
+    const schedule = [
+      { seq: 0, dueOn: "2027-01-10", amountMinor: 48000, currency: "EUR", status: "paid" },
+      { seq: 1, dueOn: "2027-05-31", amountMinor: 192000, currency: "EUR", status: "scheduled" },
+    ];
+    const link = await renderEmail("booking_confirmed", { experience: "R", schedule, payByLink: true });
+    expect(link.text).toContain("We'll email you a secure link to pay each instalment.");
+    expect(link.text).not.toContain("charge your saved card");
+    const card = await renderEmail("booking_confirmed", { experience: "R", schedule, payByLink: false });
+    expect(card.text).toContain("Ef Zin will charge your saved card on these dates");
+  });
+
+  it("scheduled_payment_upcoming shows the card ending only when known", async () => {
+    const base = { experience: "R", amountMinor: 96000, currency: "EUR", dueOn: "2027-03-13" };
+    expect((await renderEmail("scheduled_payment_upcoming", { ...base, cardLast4: "4242" })).text).toContain("ending 4242");
+    expect((await renderEmail("scheduled_payment_upcoming", base)).text).not.toContain("ending");
+  });
+
+  it("day_before has the address, map link and timing when given", async () => {
+    const r = await renderEmail("day_before", {
+      experience: "Sound Bath",
+      venue: "Alserkal",
+      address: "Alserkal Avenue, Dubai",
+      mapUrl: "https://maps.test/x",
+      timings: ["10:00 Arrival", "10:30 Sound bath"],
+    });
+    for (const t of ["Alserkal Avenue, Dubai", "https://maps.test/x", "10:00 Arrival", "10:30 Sound bath"]) expect(r.text).toContain(t);
+  });
+
+  it("day_after links to the review page", async () => {
+    const { REVIEW_URL } = await import("../../lib/site");
+    const r = await renderEmail("day_after", { name: "Sara", experience: "Sound Bath" });
+    expect(r.text).toContain("Leave a review");
+    expect(r.html).toContain(REVIEW_URL);
+  });
+
   it("mentions the printable card only when a PDF is attached", async () => {
     const without = await renderEmail("gift_card_delivered", { recipientName: "Noor", code: "C", hasPdf: false });
     expect(without.text).not.toContain("printable");

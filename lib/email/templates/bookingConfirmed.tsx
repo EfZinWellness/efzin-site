@@ -65,10 +65,19 @@ export const bookingConfirmed: EmailTemplate = {
                 STATUS[i.status] ?? i.status,
               ])}
             />
-            <Small>
-              Ef Zin will charge your saved card on these dates, in {schedule[schedule.length - 1].currency || "the experience's currency"}; your
-              bank converts if needed. We email you three days before each payment. You can pay the rest early or update your card in My Ef Zin.
-            </Small>
+            {d.payByLink === true ? (
+              <Small>
+                {"We'll email you a secure link to pay each instalment."} Payments are in{" "}
+                {schedule[schedule.length - 1].currency || "the experience's currency"}; your bank converts if needed. You can also pay the
+                rest early in My Ef Zin.
+              </Small>
+            ) : (
+              <Small>
+                Ef Zin will charge your saved card on these dates, in {schedule[schedule.length - 1].currency || "the experience's currency"};
+                your bank converts if needed. We email you three days before each payment. You can pay the rest early or update your card in
+                My Ef Zin.
+              </Small>
+            )}
           </>
         ) : null}
         <H2>Before you arrive</H2>

@@ -19,11 +19,21 @@ export const report = (ctx: JobContext, err: unknown, context: string, extra?: R
  * Sends one email at most once per (kind, to, ref) (email_log). A failure is reported and the
  * claim released, so the next run retries; never throws.
  */
-export async function mail(ctx: JobContext, kind: EmailKind, to: string, data: Record<string, unknown>, ref: string): Promise<void> {
+export async function mail(
+  ctx: JobContext,
+  kind: EmailKind,
+  to: string,
+  data: Record<string, unknown>,
+  ref: string,
+  /** Facts for Tanya if the send fails (e.g. the booking id). */
+  extra: Record<string, unknown> = {},
+): Promise<boolean> {
   try {
     await ctx.sendEmail(kind, to, data, undefined, { ref, db: ctx.db });
+    return true;
   } catch (err) {
-    await report(ctx, err, `email_${kind}`, { ref });
+    await report(ctx, err, `email_${kind}`, { ref, ...extra });
+    return false;
   }
 }
 

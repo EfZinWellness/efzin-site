@@ -5,8 +5,8 @@ import { step, type JobContext } from "./context";
 
 /** Holds and reservations are released this long after they expire (a late webhook goes first). */
 export const RELEASE_GRACE_MS = 5 * 60_000;
-/** Gift cards whose purchase never completed are removed after this long. */
-export const GIFT_PENDING_MAX_MS = 24 * 3_600_000;
+/** Gift cards whose purchase never completed are removed after this long (Checkout sessions last at most 24 h). */
+export const GIFT_PENDING_MAX_MS = 25 * 3_600_000;
 
 export interface HourlySummary {
   releasedCheckouts: number | null;

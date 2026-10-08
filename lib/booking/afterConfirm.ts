@@ -11,6 +11,8 @@ export interface ConfirmEffects {
   auth: AuthAdmin | null;
   /** Site origin for links, e.g. https://www.efzinwellness.com */
   origin: string;
+  /** No card was saved at checkout: later instalments are paid through emailed links. */
+  payByLink?: boolean;
 }
 
 type Guest = { person_id: string; name: string; email: string; is_booker: boolean; ticket_type_id: string };
@@ -119,6 +121,7 @@ export async function afterBookingConfirmed(db: SqlClient, outcome: ConfirmOutco
         policy: Array.isArray(snapshot.copy) ? snapshot.copy : [],
         policyTemplate: snapshot.template ?? null,
         calendar: calendar.length > 0,
+        payByLink: fx.payByLink === true,
         bookingId,
       paymentOption: b.payment_option,
       amountPaidMinor: b.amount_paid_minor,

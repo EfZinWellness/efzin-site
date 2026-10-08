@@ -88,7 +88,8 @@ async function completeBooking(s: Stripe.Checkout.Session, pendingId: string | u
   // Emails first (they never throw): if saving the card fails, the retry finds the booking
   // already confirmed and only redoes the card step.
   return sequence(
-    outcome.created && (() => afterBookingConfirmed(deps.db, outcome, deps)),
+    // Without a customer on the session no card is saved, so instalments go out as pay links.
+    outcome.created && (() => afterBookingConfirmed(deps.db, outcome, { ...deps, payByLink: !customer })),
     customer ? () => saveSessionCard(deps.stripe, s, customer).then(() => {}) : null,
   );
 }

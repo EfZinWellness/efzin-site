@@ -92,6 +92,10 @@ export class FakeStripe implements StripeApi {
     retrieve: async (id: string) => ({ id, payment_method: `pm_of_${id}` }),
   };
 
+  paymentMethods = {
+    retrieve: async (id: string) => ({ id, card: { last4: "4242" } }),
+  };
+
   setupIntents = {
     retrieve: async (id: string) => ({ id, payment_method: { id: `pm_of_${id}` } }),
   };
