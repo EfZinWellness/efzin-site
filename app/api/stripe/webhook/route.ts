@@ -1,6 +1,7 @@
 import { getAuthAdmin } from "@/lib/auth/provision";
 import { withDbClient } from "@/lib/db/client";
 import { sendEmail } from "@/lib/email/send";
+import { getUsdRates } from "@/lib/pricing/rates";
 import { getStripe } from "@/lib/stripe/client";
 import { handleStripeEvent } from "@/lib/stripe/handlers";
 import { processWebhook } from "@/lib/stripe/webhook";
@@ -18,6 +19,7 @@ export async function POST(req: Request) {
           db,
           stripe: stripe!,
           sendEmail,
+          usdRates: getUsdRates,
           auth: getAuthAdmin(),
           origin: process.env.NEXT_PUBLIC_SITE_ORIGIN || new URL(req.url).origin,
         }),

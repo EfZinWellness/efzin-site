@@ -85,9 +85,16 @@ export function BookPanelProvider({ items, children }: { items: PanelItem[]; chi
           )}
 
           <Link
-            href="/events"
+            href="/gift"
             onClick={() => setIsOpen(false)}
             className="eyebrow mt-auto pt-6 text-center underline underline-offset-4"
+          >
+            Give a gift card
+          </Link>
+          <Link
+            href="/events"
+            onClick={() => setIsOpen(false)}
+            className="eyebrow pt-4 text-center underline underline-offset-4"
           >
             See everything on
           </Link>

@@ -50,6 +50,13 @@ export default async function ExperienceDetail({ experience: e }: { experience: 
           {e.story ? <p className="mt-6 whitespace-pre-line text-sm leading-7 text-navy/80">{e.story.trim()}</p> : null}
           {spotsText && status === "on_sale" ? <p className="mt-6 text-sm text-teal">{spotsText}</p> : null}
           {status === "past" ? <p className="mt-6 text-sm text-stone">This experience has taken place.</p> : null}
+          {status !== "past" ? (
+            <p className="mt-6">
+              <Link href={`/gift?for=${e.slug}`} className="eyebrow underline underline-offset-4">
+                Give this as a gift
+              </Link>
+            </p>
+          ) : null}
         </section>
 
         {isRetreat && e.whoItsFor ? (

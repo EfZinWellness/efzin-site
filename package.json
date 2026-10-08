@@ -13,6 +13,7 @@
     "sync:content": "tsx scripts/sync-content.ts"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.9.0",
     "@supabase/supabase-js": "^2.117.3",
     "gray-matter": "^4.0.3",
     "next": "16.4.0",

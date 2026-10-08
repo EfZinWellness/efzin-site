@@ -1,14 +1,23 @@
 import type { SqlClient } from "../content/sync";
+import type { SendEmailFn } from "../email/send";
 import { activateGiftCards } from "./db";
+import { deliverDueGiftCards } from "./deliver";
+
+export interface GiftActivatedDeps {
+  sendEmail: SendEmailFn;
+  origin: string;
+  now?: Date;
+  usdRates?: () => Promise<Record<string, number>>;
+}
 
 /**
- * Hook run after a paid gift card purchase has been activated and committed. Task 12 fills
- * it (deliver cards due today, buyer receipt). It must be safe to repeat: a webhook retry
- * calls it again for the same payment.
+ * Hook run after a paid gift card purchase has been activated and committed: delivers the
+ * cards due today (Dubai) and, for a bulk purchase, emails the buyer the codes. Cards for a
+ * later date wait for the daily delivery run. Safe to repeat: a webhook retry sends nothing
+ * twice (deliverDueGiftCards claims each card before sending).
  */
-export async function onGiftCardsActivated(db: SqlClient, paymentIntent: string): Promise<void> {
-  void db;
-  void paymentIntent;
+export async function onGiftCardsActivated(db: SqlClient, paymentIntent: string, deps: GiftActivatedDeps): Promise<void> {
+  await deliverDueGiftCards(db, deps.now ?? new Date(), deps, { paymentIntent });
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

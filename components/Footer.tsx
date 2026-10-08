@@ -2,6 +2,7 @@
 import Logo from "./Logo";
 
 const LINKS = [
+  ["Gift cards", "/gift"],
   ["FAQ", "/faq"],
   ["Contact", "/contact"],
   ["Terms", "/terms"],

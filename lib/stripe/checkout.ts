@@ -34,7 +34,7 @@ export type CheckoutResult = { kind: "redirect"; url: string } | { kind: "confir
  * True only when Stripe definitely did not create the session: a 4xx answer. Network errors,
  * timeouts, 5xx and 409 (idempotency conflict) are ambiguous: a session may exist.
  */
-function definitelyRejected(err: unknown): boolean {
+export function definitelyRejected(err: unknown): boolean {
   const status = (err as { statusCode?: unknown } | null)?.statusCode;
   return typeof status === "number" && status >= 400 && status < 500 && status !== 409;
 }

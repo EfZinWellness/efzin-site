@@ -61,6 +61,7 @@ export default async function NowPage() {
         <a href={WHATSAPP_URL} className="btn">Speak to Tanya</a>
         <a href={INSTAGRAM_URL} className="btn">Instagram</a>
         <Link href="/events" className="btn">All events</Link>
+        <Link href="/gift" className="btn">Gift cards</Link>
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import { GIFT_EMAIL_KINDS, renderGiftEmail, type GiftEmailKind } from "./giftEmails";
+
 export type EmailKind =
   | "booking_confirmed"
   | "guest_added"
@@ -13,9 +15,23 @@ export type EmailKind =
   | "admin_error"
   | "scheduled_payment_receipt"
   | "scheduled_payment_failed"
-  | "admin_payment_failed";
+  | "admin_payment_failed"
+  | "gift_card_bought"
+  | "gift_card_delivered"
+  | "gift_card_delivered_buyer";
 
-export type SendEmailFn = (kind: EmailKind, to: string, data: Record<string, unknown>) => Promise<void>;
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer | string;
+  contentType: string;
+}
+
+export type SendEmailFn = (
+  kind: EmailKind,
+  to: string,
+  data: Record<string, unknown>,
+  attachments?: EmailAttachment[],
+) => Promise<void>;
 
 export interface OutgoingEmail {
   from: string;
@@ -23,6 +39,7 @@ export interface OutgoingEmail {
   subject: string;
   text: string;
   html: string;
+  attachments?: EmailAttachment[];
 }
 
 export type EmailTransport = (msg: OutgoingEmail) => Promise<void>;
@@ -40,6 +57,7 @@ export function setEmailTransport(fn: EmailTransport | null): void {
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 function render(kind: EmailKind, data: Record<string, unknown>): { subject: string; text: string; html: string } {
+  if (GIFT_EMAIL_KINDS.has(kind)) return renderGiftEmail(kind as GiftEmailKind, data);
   const label = kind.replace(/_/g, " ");
   const subject =
     kind === "request_received"
@@ -65,10 +83,20 @@ async function defaultTransport(msg: OutgoingEmail): Promise<void> {
 }
 
 /** Minimal sender; a later task adds templates and an email log. */
-export async function sendEmail(kind: EmailKind, to: string, data: Record<string, unknown>): Promise<void> {
+export async function sendEmail(
+  kind: EmailKind,
+  to: string,
+  data: Record<string, unknown>,
+  attachments?: EmailAttachment[],
+): Promise<void> {
   const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const recipients = ADMIN_KINDS.has(kind) && admins.length > 0 ? admins : [to];
-  const msg: OutgoingEmail = { from: FROM, to: recipients, ...render(kind, data) };
+  const msg: OutgoingEmail = {
+    from: FROM,
+    to: recipients,
+    ...render(kind, data),
+    ...(attachments && attachments.length > 0 ? { attachments } : {}),
+  };
   await (override ?? defaultTransport)(msg);
 }
 
@@ -78,9 +106,10 @@ export async function sendQuietly(
   kind: EmailKind,
   to: string,
   data: Record<string, unknown>,
+  attachments?: EmailAttachment[],
 ): Promise<boolean> {
   try {
-    await send(kind, to, data);
+    await (attachments ? send(kind, to, data, attachments) : send(kind, to, data));
     return true;
   } catch (err) {
     console.error(`[email] ${kind} to ${to} failed`, err);

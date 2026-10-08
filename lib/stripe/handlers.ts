@@ -23,6 +23,8 @@ export interface WebhookDeps {
   /** Site origin for links in emails. */
   origin: string;
   now?: Date;
+  /** USD rates for the "≈" estimate on gift card emails (optional). */
+  usdRates?: () => Promise<Record<string, number>>;
 }
 
 /**
@@ -138,7 +140,7 @@ async function completeGiftPurchase(s: Stripe.Checkout.Session, deps: WebhookDep
           paymentIntent: pi,
         });
       }),
-    () => onGiftCardsActivated(deps.db, pi),
+    () => onGiftCardsActivated(deps.db, pi, deps),
   );
 }
 
