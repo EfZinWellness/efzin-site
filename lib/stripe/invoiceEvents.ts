@@ -49,6 +49,10 @@ async function lockItem(db: SqlClient, invoice: Stripe.Invoice, includeSettled =
   );
   const item = r.rows[0];
   if (!item) return null;
+  // The same invoice that already paid this item (before the booking was cancelled) seen again:
+  // nothing to do, and above all no second refund. (An item settled by "Pay the rest now" whose
+  // own invoice was paid too is a double payment and goes on to the checks below.)
+  if (item.status === "paid" && item.stripe_invoice_id === invoice.id && !item.pay_rest) return null;
   if (!ACTIVE_BOOKING.has(item.booking_status)) return { item, active: false };
   if (item.status === "paid" && includeSettled) return { item, active: true, settled: true };
   if (item.status === "paid" || item.status === "cancelled") return null;

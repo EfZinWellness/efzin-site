@@ -160,6 +160,19 @@ describe("invoice webhooks (follow-ups)", () => {
     expect((await item(items[1].id)).stripe_invoice_id).toBe("in_evt_a");
   });
 
+  it("a replayed invoice.paid for an item paid before the booking was cancelled is not refunded again", async () => {
+    const { bookingId, items } = await planBooking(w);
+    await handleStripeEvent(invoiceEvent("evt_a", "invoice.paid", items[1].id, bookingId), w.deps);
+    await w.db.query("update bookings set status = 'cancelled' where id = $1", [bookingId]);
+    w.stripe.invoicePaymentIntent.in_evt_a = "pi_inst";
+    w.emails.length = 0;
+    // The same invoice again under a new event id (or after the stripe_events row was lost).
+    await handleStripeEvent(invoiceEvent("evt_a2", "invoice.paid", items[1].id, bookingId, { id: "in_evt_a" }), w.deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect((await w.db.query("select * from invoice_refunds")).rows).toEqual([]);
+    expect(w.emails).toEqual([]);
+  });
+
   it("a repeat invoice.paid for the same invoice is not a double payment", async () => {
     const { bookingId, items } = await planBooking(w);
     await handleStripeEvent(invoiceEvent("evt_a", "invoice.paid", items[1].id, bookingId), w.deps);
