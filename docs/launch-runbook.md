@@ -87,7 +87,7 @@ Do this once for `efzin-staging`, and again for `efzin-prod` before launch. The 
 
 Claude does these with the staging connection details. (Production repeats them at section I.)
 
-- [ ] **[Claude]** Apply the migrations (all 18 files in `supabase/migrations/`) to staging: `npx supabase link --project-ref <staging ref>` then `npx supabase db push`. (Alternative if the Supabase login is awkward: run each file in order with `psql "$DATABASE_URL" -f supabase/migrations/0001_schema.sql`, and so on to 0018.)
+- [ ] **[Claude]** Apply the migrations (all 19 files in `supabase/migrations/`) to staging: `npx supabase link --project-ref <staging ref>` then `npx supabase db push`. (Alternative if the Supabase login is awkward: run each file in order with `psql "$DATABASE_URL" -f supabase/migrations/0001_schema.sql`, and so on to 0019.)
 - [ ] **[Claude]** Regenerate the data types from the real database: `npx supabase gen types typescript --project-id <staging ref> > lib/db/types.ts`. The types were hand-written until now, so this may show small differences; Claude fixes any and re-runs the tests.
 - [ ] **[Claude]** Check the real Postgres behaves as the tests assumed (the tests used a stand-in database): security rules for signed-in members, and that two people cannot take the last spot at the same moment.
 - [ ] **[Claude]** Run `show idle_in_transaction_session_timeout;`. The booking and refund code sometimes keeps a database transaction open for a moment while it talks to Stripe. If the value is a very short number (a few seconds), raise it to about 60 seconds: `alter role postgres set idle_in_transaction_session_timeout = '60s';`.

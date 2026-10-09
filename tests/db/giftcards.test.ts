@@ -351,6 +351,16 @@ describe("rev 2 row level security", () => {
     const bCards = await asUser(uB, async () => (await db.query<{ id: string }>("select id from gift_cards")).rows);
     expect(bCards.map((r) => r.id)).toEqual([cardBO.id]);
 
+    // Members never read a card's code or its payment details directly (the site reads them server side).
+    await asUser(uA, async () => {
+      for (const col of ["code", "stripe_payment_intent", "amount_paid_minor", "presentment_currency"]) {
+        await expect(db.query(`select ${col} from gift_cards`), col).rejects.toThrow(/permission denied/);
+      }
+      await expect(db.query("select * from gift_cards")).rejects.toThrow(/permission denied/);
+      const visible = await db.query<{ status: string }>("select id, status, balance_aed_minor, recipient_name, expires_at from gift_cards");
+      expect(visible.rows).toHaveLength(2);
+    });
+
     const aItems = await asUser(uA, async () => (await db.query<{ booking_id: string }>("select booking_id from payment_schedule_items")).rows);
     expect(aItems.map((r) => r.booking_id)).toEqual([bkA]);
 
