@@ -20,6 +20,8 @@ export interface DailyDeps {
   origin: string;
   /** Venue address, map link and timing from the experience's content file (day-before email). */
   experienceInfo?: ExperienceInfo;
+  /** USD rates, for the AED value of an instalment recorded from Stripe (revenue). */
+  usdRates?: () => Promise<Record<string, number>>;
 }
 
 export interface DailySummary {
@@ -48,7 +50,7 @@ export interface DailySummary {
  */
 export async function runDaily(db: SqlClient, now: Date, deps: DailyDeps): Promise<DailySummary> {
   const ctx: JobContext = { db, now, sendEmail: deps.sendEmail, origin: deps.origin };
-  const cancelledUnpaid = await step(ctx, "daily_cancel_unpaid", () => cancelUnpaidBookings(ctx, deps.stripe));
+  const cancelledUnpaid = await step(ctx, "daily_cancel_unpaid", () => cancelUnpaidBookings(ctx, deps.stripe, deps.usdRates));
   return {
     cancelledUnpaid,
     unpaidNotices: await step(ctx, "daily_unpaid_notices", () => sendUnpaidCancellationNotices(ctx)),

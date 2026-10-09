@@ -184,6 +184,50 @@ describe("daily job: unpaid at the balance due date", () => {
     expect(w.stripe.invoicesCreated).toEqual([]);
   });
 
+  it("an invoice Stripe shows as paid (webhook late) is recorded as paid instead of cancelling the booking", async () => {
+    const b = await attemptedAndFailed();
+    w.stripe.invoiceStatus.in_open = "paid";
+    w.stripe.invoiceDetails.in_open = {
+      amount_paid: 192000,
+      currency: "eur",
+      metadata: { kind: "scheduled_payment", item_id: b.itemIds[1], booking_id: b.bookingId },
+    };
+    await runDaily(w.db, at("2027-06-02"), { ...deps, usdRates: async () => ({ EUR: 0.92 }) });
+    expect(await status("bookings", b.bookingId)).toBe("paid");
+    const it1 = (
+      await w.db.query<{ status: string; stripe_invoice_id: string }>(
+        "select status, stripe_invoice_id from payment_schedule_items where id = $1",
+        [b.itemIds[1]],
+      )
+    ).rows[0];
+    expect(it1).toEqual({ status: "paid", stripe_invoice_id: "in_open" });
+    expect(w.stripe.voided).toEqual([]);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect(kinds(sent)).toEqual(["scheduled_payment_receipt>amal@x.com"]);
+    // The late webhook then changes nothing and refunds nothing.
+    const { handleStripeEvent } = await import("../../lib/stripe/handlers");
+    const { invoiceEvent } = await import("./webhookFixtures");
+    await handleStripeEvent(
+      invoiceEvent("evt_late", "invoice.paid", b.itemIds[1], b.bookingId, { id: "in_open" }),
+      { ...w.deps, sendEmail: deps.sendEmail },
+    );
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect(sent.filter((s) => s.kind === "scheduled_payment_receipt")).toHaveLength(1);
+  });
+
+  it("when Stripe cannot be reached to check the invoices, the booking is not cancelled in this run", async () => {
+    const b = await attemptedAndFailed();
+    w.stripe.invoiceRetrieveError = Object.assign(new Error("api down"), { statusCode: 503 });
+    await runDaily(w.db, at("2027-06-02"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("deposit_paid");
+    expect(w.stripe.voided).toEqual([]);
+    expect(sent.filter((s) => s.kind === "booking_cancelled_unpaid")).toEqual([]);
+    expect(kinds(sent)).toContain(`admin_error>${ADMIN}`);
+    w.stripe.invoiceRetrieveError = null;
+    await runDaily(w.db, at("2027-06-03"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("cancelled");
+  });
+
   it("never cancels for an item Ef Zin never tried to collect (missed run): it is charged late instead", async () => {
     savedCard("cus_a");
     const b = await plan("amal@x.com", "cus_a", [{ seq: 1, dueOn: "2027-05-31", amount: 192000, status: "scheduled" }]);

@@ -68,6 +68,10 @@ export interface StripeApi {
       status: Stripe.Invoice.Status | null;
       total: number;
       collection_method: Stripe.Invoice.CollectionMethod;
+      /** What a paid invoice settles (the daily job records a paid invoice the webhook missed). */
+      amount_paid?: number;
+      currency?: string;
+      metadata?: Stripe.Metadata | null;
     }>;
     finalizeInvoice(
       id: string,

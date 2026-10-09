@@ -182,6 +182,10 @@ export class FakeStripe implements StripeApi {
 
   /** Runs inside invoices.create, after the draft exists and before it is returned (race tests). */
   onInvoiceCreate: (() => Promise<void>) | null = null;
+  /** Extra fields returned by invoices.retrieve (for invoices not created through this fake). */
+  invoiceDetails: Record<string, { amount_paid?: number; currency?: string; metadata?: Stripe.Metadata | null }> = {};
+  /** Set to make invoices.retrieve throw (Stripe unreachable). */
+  invoiceRetrieveError: unknown = null;
   /** Draft invoices deleted (invoices.del). */
   deletedInvoices: string[] = [];
 
@@ -205,13 +209,20 @@ export class FakeStripe implements StripeApi {
       delete this.invoiceStatus[id];
       return { id, deleted: true as const };
     },
-    retrieve: async (id: string) => ({
-      id,
-      status: this.invoiceStatus[id] ?? null,
-      total: this.invoiceTotal[id] ?? 0,
-      collection_method: (this.invoicesCreated.find((i) => i.id === id)?.params.collection_method ??
-        "charge_automatically") as Stripe.Invoice.CollectionMethod,
-    }),
+    retrieve: async (id: string) => {
+      if (this.invoiceRetrieveError) throw this.invoiceRetrieveError;
+      const created = this.invoicesCreated.find((i) => i.id === id)?.params;
+      return {
+        id,
+        status: this.invoiceStatus[id] ?? null,
+        total: this.invoiceTotal[id] ?? 0,
+        collection_method: (created?.collection_method ?? "charge_automatically") as Stripe.Invoice.CollectionMethod,
+        metadata: (created?.metadata ?? null) as Stripe.Metadata | null,
+        currency: created?.currency ?? "",
+        amount_paid: this.invoiceStatus[id] === "paid" ? (this.invoiceTotal[id] ?? 0) : 0,
+        ...this.invoiceDetails[id],
+      };
+    },
     finalizeInvoice: async (id: string, params?: Stripe.InvoiceFinalizeInvoiceParams) => {
       this.invoiceFinalized.push({ id, params });
       this.invoiceStatus[id] = "open";

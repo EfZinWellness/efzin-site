@@ -2,6 +2,7 @@ import { loadExperience } from "@/lib/content/load";
 import { runDaily } from "@/lib/cron/daily";
 import { cronOrigin, cronRoute } from "@/lib/cron/route";
 import { sendEmail } from "@/lib/email/send";
+import { getUsdRates } from "@/lib/pricing/rates";
 import { getStripe } from "@/lib/stripe/client";
 
 export const maxDuration = 300;
@@ -9,6 +10,12 @@ export const maxDuration = 300;
 /** Vercel cron, 06:00 Dubai (`0 2 * * *`): reminders, instalments, unpaid cancellations, expiries. */
 export async function GET(req: Request) {
   return cronRoute(req, "daily", (db, now) =>
-    runDaily(db, now, { stripe: getStripe(), sendEmail, origin: cronOrigin(), experienceInfo: loadExperience }),
+    runDaily(db, now, {
+      stripe: getStripe(),
+      sendEmail,
+      origin: cronOrigin(),
+      experienceInfo: loadExperience,
+      usdRates: getUsdRates,
+    }),
   );
 }

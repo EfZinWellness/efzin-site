@@ -1,8 +1,11 @@
+import type Stripe from "stripe";
 import { cancelBooking } from "../booking/cancel";
 import { dubaiToday } from "../giftcards/dates";
 import { adminAddress } from "../requests/handlers";
 import { pendingAutoRefunds, refundInactiveInvoiceNow, refundNotices, refundPayRestExcessNow } from "../stripe/autoRefunds";
 import type { StripeApi } from "../stripe/client";
+import type { AfterCommit } from "../stripe/events";
+import { onInvoicePaid } from "../stripe/invoiceEvents";
 import { settleCancellation } from "../stripe/refund";
 import { mail, report, type JobContext } from "./context";
 
@@ -33,7 +36,11 @@ const FACTS = `b.id, p.name, p.email, e.title, e.start_at, e.timezone, b.amount_
  * follows the policy (none at 10 days before a retreat). The notices go out from
  * sendUnpaidCancellationNotices.
  */
-export async function cancelUnpaidBookings(ctx: JobContext, stripe: StripeApi | null): Promise<number> {
+export async function cancelUnpaidBookings(
+  ctx: JobContext,
+  stripe: StripeApi | null,
+  usdRates?: () => Promise<Record<string, number>>,
+): Promise<number> {
   const today = dubaiToday(ctx.now);
   const r = await ctx.db.query<BookingFacts>(
     `select ${FACTS}
@@ -53,6 +60,9 @@ export async function cancelUnpaidBookings(ctx: JobContext, stripe: StripeApi | 
   let cancelled = 0;
   for (const b of r.rows) {
     try {
+      // Stripe is the truth for invoices already sent: one paid while its webhook is late is
+      // recorded here, and the booking is left for the next run (never cancelled on stale data).
+      if ((await checkInvoicesInStripe(ctx, stripe, b.id, usdRates)) !== "unpaid") continue;
       // The guest-cancellation path and maths (policy money back on the amounts paid, as a guest
       // cancelling now), only while the booking is still part paid. The notices go out below.
       const out = await cancelBooking(ctx.db, stripe, b.id, "refund", "guest", ctx.now, {
@@ -73,6 +83,67 @@ export async function cancelUnpaidBookings(ctx: JobContext, stripe: StripeApi | 
     }
   }
   return cancelled;
+}
+
+/**
+ * Before an unpaid-balance cancellation: every unpaid item that already has a Stripe invoice is
+ * looked up in Stripe. "unpaid": none of them is paid, go ahead. "paid": at least one was paid
+ * (its invoice.paid webhook is late or lost); it is recorded through the webhook's own path
+ * (onInvoicePaid: item paid, booking paid when nothing is left, receipt; a later webhook for the
+ * same invoice then does nothing), or Tanya is told when it cannot be matched, and the booking is
+ * not cancelled in this run. "unknown": Stripe could not be asked; not cancelled in this run.
+ */
+async function checkInvoicesInStripe(
+  ctx: JobContext,
+  stripe: StripeApi | null,
+  bookingId: string,
+  usdRates?: () => Promise<Record<string, number>>,
+): Promise<"unpaid" | "paid" | "unknown"> {
+  const items = await ctx.db.query<{ id: string; stripe_invoice_id: string }>(
+    `select id, stripe_invoice_id from payment_schedule_items
+      where booking_id = $1 and status in ('scheduled', 'failed') and amount_minor > 0 and stripe_invoice_id is not null
+      order by seq`,
+    [bookingId],
+  );
+  if (items.rows.length === 0) return "unpaid";
+  if (!stripe) {
+    await report(ctx, new Error("STRIPE_SECRET_KEY is not configured: invoices not checked, booking not cancelled"), "daily_cancel_check_invoices", { bookingId });
+    return "unknown";
+  }
+  let paid = false;
+  for (const it of items.rows) {
+    let inv: Awaited<ReturnType<StripeApi["invoices"]["retrieve"]>>;
+    try {
+      inv = await stripe.invoices.retrieve(it.stripe_invoice_id);
+    } catch (err) {
+      await report(ctx, err, "daily_cancel_check_invoices", { bookingId, invoiceId: it.stripe_invoice_id });
+      return "unknown";
+    }
+    if (inv.status !== "paid") continue;
+    paid = true;
+    let after: AfterCommit | void;
+    await ctx.db.query("begin");
+    try {
+      after = await onInvoicePaid(
+        { amount_paid: inv.total, currency: "", metadata: null, ...inv } as unknown as Stripe.Invoice,
+        { db: ctx.db, stripe, sendEmail: ctx.sendEmail, auth: null, origin: ctx.origin, now: ctx.now, usdRates },
+      );
+      await ctx.db.query("commit");
+    } catch (err) {
+      await ctx.db.query("rollback").catch(() => {});
+      throw err;
+    }
+    if (after) await after();
+    const now = await ctx.db.query<{ status: string }>("select status from payment_schedule_items where id = $1", [it.id]);
+    if (now.rows[0]?.status !== "paid") {
+      await report(ctx, new Error(`Invoice ${inv.id} is paid in Stripe but could not be recorded on item ${it.id}`), `daily_cancel_paid_invoice_${it.id}`, {
+        bookingId,
+        invoiceId: inv.id,
+        problem: "A booking was due to be cancelled for an unpaid balance, but Stripe shows this instalment as paid. The booking was kept; please check it.",
+      });
+    }
+  }
+  return paid ? "paid" : "unpaid";
 }
 
 /**
