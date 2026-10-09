@@ -56,6 +56,8 @@ export async function cancelUnpaidBookings(ctx: JobContext, stripe: StripeApi | 
       // cancelling now), only while the booking is still part paid. The notices go out below.
       const out = await cancelBooking(ctx.db, stripe, b.id, "refund", "guest", ctx.now, {
         reason: "unpaid_balance",
+        // Refund if the policy offers one, else credit if offered (e.g. an event within 48 hours).
+        creditFallback: true,
         requireStatus: "deposit_paid",
         sendEmail: ctx.sendEmail,
         origin: ctx.origin,
@@ -98,7 +100,16 @@ export async function finishPendingRefunds(ctx: JobContext, stripe: StripeApi | 
 export async function sendUnpaidCancellationNotices(ctx: JobContext): Promise<number> {
   const admin = adminAddress();
   const r = await ctx.db.query<
-    BookingFacts & { cancelled_at: string | Date; unpaid: number; last_due: string | null; refund: number; refund_currency: string | null }
+    BookingFacts & {
+      cancelled_at: string | Date;
+      unpaid: number;
+      last_due: string | null;
+      refund: number;
+      refund_currency: string | null;
+      credit_aed: number;
+      credit_code: string | null;
+      credit_expires: string | null;
+    }
   >(
     `select ${FACTS}, b.cancelled_at,
             (select coalesce(sum(i.amount_minor), 0)::int from payment_schedule_items i
@@ -107,11 +118,15 @@ export async function sendUnpaidCancellationNotices(ctx: JobContext): Promise<nu
               where i.booking_id = b.id and i.status = 'cancelled') as last_due,
             (select coalesce(sum(f.amount_minor), 0)::int from booking_refunds f where f.booking_id = b.id) as refund,
             (select case when count(distinct f.currency) = 1 then min(f.currency) end from booking_refunds f
-              where f.booking_id = b.id) as refund_currency
+              where f.booking_id = b.id) as refund_currency,
+            (select coalesce(sum(c.amount_aed_minor), 0)::int from credits c where c.source_booking_id = b.id) as credit_aed,
+            (select min(c.code) from credits c where c.source_booking_id = b.id) as credit_code,
+            (select to_char(min(c.expires_at) at time zone 'Asia/Dubai', 'YYYY-MM-DD') from credits c
+              where c.source_booking_id = b.id) as credit_expires
        from bookings b
        join experiences e on e.id = b.experience_id
        join people p on p.id = b.booker_person_id
-      where b.status in ('cancelled', 'refunded') and b.cancel_reason = 'unpaid_balance'
+      where b.status in ('cancelled', 'refunded', 'credited') and b.cancel_reason = 'unpaid_balance'
         and b.cancelled_at > $1::timestamptz - make_interval(days => $3::int)
         and (not exists (select 1 from email_log l where l.kind = 'booking_cancelled_unpaid' and l.ref = b.id::text
                           and l."to" = lower(trim(p.email)))
@@ -132,9 +147,11 @@ export async function sendUnpaidCancellationNotices(ctx: JobContext): Promise<nu
       refundMinor: b.refund_currency ? b.refund : 0,
       refundCurrency: b.refund_currency,
       refundDue: b.refund > 0 && !b.refund_currency,
+      creditAed: b.credit_aed,
+      creditExpiresOn: b.credit_expires,
     };
     const facts = { bookingId: b.id };
-    await mail(ctx, "booking_cancelled_unpaid", b.email, { ...data, name: b.name }, b.id, facts);
+    await mail(ctx, "booking_cancelled_unpaid", b.email, { ...data, name: b.name, creditCode: b.credit_code }, b.id, facts);
     await mail(
       ctx,
       "booking_cancelled_unpaid",

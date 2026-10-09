@@ -1,6 +1,6 @@
 import { AdminEmail } from "./AdminFacts";
 import { Facts, Layout, P, Small } from "./Layout";
-import { day, greeting, money, num, str, type EmailTemplate } from "./helpers";
+import { aed, day, greeting, money, num, str, type EmailTemplate } from "./helpers";
 
 /** Sent to the booker, and (with `forAdmin`) to Tanya, when the balance was unpaid at the due date. */
 export const bookingCancelledUnpaid: EmailTemplate = {
@@ -22,6 +22,7 @@ export const bookingCancelledUnpaid: EmailTemplate = {
     const unpaid = money(d.unpaidMinor, d.currency);
     const due = day(d.balanceDueOn);
     const refund = num(d.refundMinor) ?? 0;
+    const credit = num(d.creditAed) ?? 0;
     return (
       <Layout preview="Your booking has been cancelled because the balance was not paid." title="Your booking has been cancelled">
         <P>{greeting(d.name)}</P>
@@ -35,15 +36,20 @@ export const bookingCancelledUnpaid: EmailTemplate = {
             ["Unpaid balance", unpaid],
             ["Balance due date", due],
             ["Refund", refund > 0 ? money(refund, d.refundCurrency ?? d.currency) : ""],
+            ["Credit", credit > 0 ? aed(credit) : ""],
+            ["Credit code", str(d.creditCode)],
+            ["Credit expires", day(d.creditExpiresOn)],
           ]}
         />
         <P>
           No further payments will be taken.{" "}
           {refund > 0
             ? "The refund shown above is on its way to your card."
-            : d.refundDue === true
-              ? "We'll be in touch about the money due back to you under the policy."
-              : "Under the policy, amounts already paid are not refunded at this point."}
+            : credit > 0
+              ? "Under the policy, what you paid has been turned into Ef Zin credit: enter the code when you book any event or retreat."
+              : d.refundDue === true
+                ? "The refunds due under the policy have been made to your card."
+                : "Under the policy, amounts already paid are not refunded at this point."}
         </P>
         <Small>If you think this is a mistake, or you’d like to talk it through, just reply to this email.</Small>
       </Layout>

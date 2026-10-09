@@ -175,6 +175,11 @@ const CASES: [EmailKind, Record<string, unknown>, { subject: string; text: strin
     { subject: "Sound Bath has been cancelled", text: ["full refund", "no fees deducted", "AED 280", "future experience"] },
   ],
   [
+    "booking_cancelled",
+    { name: "Sara", experience: "Sound Bath", forGuest: true, bookerName: "Layla H" },
+    { subject: "Your place at Sound Bath has been cancelled", text: ["Layla H has cancelled", "your place is cancelled too"] },
+  ],
+  [
     "booking_transferred",
     { name: "Sara", experience: "Sound Bath", newGuestName: "Nour N", startsAt: "2027-02-01T06:00:00.000Z" },
     { subject: "Your place at Sound Bath has been transferred", text: ["to Nour N", "1 February 2027"] },

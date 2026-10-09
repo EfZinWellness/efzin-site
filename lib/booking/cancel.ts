@@ -29,6 +29,8 @@ export interface CancelOptions {
   expectedFingerprint?: string;
   /** Daily job: cancelled for an unpaid balance (allows cancelling with nothing back). */
   reason?: "unpaid_balance";
+  /** A "refund" the policy doesn't offer becomes credit when credit is offered (daily job). */
+  creditFallback?: boolean;
   /** Only cancel a booking in this status (else nothing happens). */
   requireStatus?: "paid" | "deposit_paid";
   sendEmail?: SendEmailFn;
@@ -90,7 +92,7 @@ export async function cancelBooking(
   if (!UUID_RE.test(bookingId)) throw new CancelError("not_found");
   let b: CancelBookingRow | null;
   let plan: CancellationPlan;
-  let creditCode: string | null = null;
+  let applied: Applied;
   await db.query("begin");
   try {
     b = await loadForCancel(db, bookingId, now, true);
@@ -103,8 +105,12 @@ export async function cancelBooking(
       return { bookingId, cancelled: false, status: b.status, plan: null, creditCode: null, problems };
     }
     plan = await planCancellation(db, stripe, b, choice, cancelledBy, now, opts.reason !== undefined);
+    const kinds = plan.options.map((o) => o.kind);
+    if (choice === "refund" && opts.creditFallback && !kinds.includes("refund") && kinds.includes("credit")) {
+      plan = await planCancellation(db, stripe, b, "credit", cancelledBy, now);
+    }
     if (opts.expectedFingerprint !== undefined && opts.expectedFingerprint !== plan.fingerprint) throw new CancelError("changed");
-    creditCode = await applyInDb(db, b, plan, cancelledBy, now, opts.reason ?? null);
+    applied = await applyInDb(db, b, plan, cancelledBy, now, opts.reason ?? null);
     await db.query("commit");
   } catch (err) {
     await db.query("rollback").catch(() => {});
@@ -120,12 +126,19 @@ export async function cancelBooking(
       );
     }
   }
-  if (opts.sendEmail && opts.notifyGuests !== false) await emailGuests(db, opts.sendEmail, b, plan, cancelledBy, creditCode, now);
+  if (opts.sendEmail && opts.notifyGuests !== false) await emailGuests(db, opts.sendEmail, b, plan, cancelledBy, applied, now);
   if (problems.length > 0) await reportProblems(opts, problems, bookingId);
-  return { bookingId, cancelled: true, status: plan.status, plan, creditCode, problems };
+  return { bookingId, cancelled: true, status: plan.status, plan, creditCode: applied.creditCode, problems };
 }
 
-/** The database writes of a cancellation (caller's transaction). Returns the credit code issued, if any. */
+/** What the cancellation actually did (a dead gift card turns its part into credit). */
+interface Applied {
+  creditCode: string | null;
+  giftCardAed: number;
+  creditAed: number;
+}
+
+/** The database writes of a cancellation (caller's transaction). */
 async function applyInDb(
   db: SqlClient,
   b: CancelBookingRow,
@@ -133,13 +146,14 @@ async function applyInDb(
   cancelledBy: CancelledBy,
   now: Date,
   reason: string | null,
-): Promise<string | null> {
+): Promise<Applied> {
   await db.query(
     "update bookings set status = $2, cancelled_by = $3, cancelled_at = $4, cancel_reason = $5 where id = $1",
     [b.id, plan.status, cancelledBy, now.toISOString(), reason],
   );
   await db.query("update payment_schedule_items set status = 'cancelled' where booking_id = $1 and status in ('scheduled', 'failed')", [b.id]);
   let creditAed = plan.toCreditAed;
+  let giftCardAed = plan.toGiftCardAed;
   if (plan.toGiftCardAed > 0 && b.gift_card_id) {
     await db.query("savepoint gift_return");
     try {
@@ -150,6 +164,7 @@ async function applyInDb(
       if (!(err instanceof GiftReturnError) || err.code !== "GIFT_NOT_RETURNABLE") throw err;
       await db.query("rollback to savepoint gift_return");
       creditAed += plan.toGiftCardAed;
+      giftCardAed = 0;
     }
   }
   let code: string | null = null;
@@ -161,16 +176,17 @@ async function applyInDb(
       [b.id, c.chargeId, i, c.amountMinor, c.currency, c.feeMinor],
     );
   }
-  return code;
+  return { creditCode: code, giftCardAed, creditAed };
 }
 
+/** The booker gets what came back where; everyone else on the booking that their place is cancelled. */
 async function emailGuests(
   db: SqlClient,
   send: SendEmailFn,
   b: CancelBookingRow,
   plan: CancellationPlan,
   cancelledBy: CancelledBy,
-  creditCode: string | null,
+  applied: Applied,
   now: Date,
 ): Promise<void> {
   const people = await db.query<{ name: string; email: string; is_booker: boolean }>(
@@ -184,20 +200,20 @@ async function emailGuests(
     timezone: b.timezone,
     byEfzin: cancelledBy === "efzin",
   };
+  const bookerName = people.rows.find((p) => p.is_booker)?.name ?? "";
   for (const p of people.rows) {
-    if (!p.is_booker && cancelledBy !== "efzin") continue;
     const data = p.is_booker
       ? {
           ...common,
           name: p.name,
           cardRefunds: plan.toCardByCharge.map((c) => ({ amountMinor: c.amountMinor, currency: c.currency })),
           feesDeductedMinor: plan.feesDeductedMinor,
-          giftCardAed: plan.toGiftCardAed,
-          creditAed: plan.toCreditAed,
-          creditCode,
-          creditExpiresOn: creditCode ? creditExpiry(now).toISOString().slice(0, 10) : null,
+          giftCardAed: applied.giftCardAed,
+          creditAed: applied.creditAed,
+          creditCode: applied.creditCode,
+          creditExpiresOn: applied.creditCode ? creditExpiry(now).toISOString().slice(0, 10) : null,
         }
-      : { ...common, name: p.name, forGuest: true };
+      : { ...common, name: p.name, forGuest: true, bookerName };
     await sendQuietly(send, "booking_cancelled", p.email, data, undefined, { ref: b.id, db });
   }
 }

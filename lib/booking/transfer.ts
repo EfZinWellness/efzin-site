@@ -5,8 +5,14 @@ import { upsertPersonByEmail } from "../people/upsert";
 import { cancelOptions } from "../policy/options";
 import type { PolicyTemplate } from "../policy/types";
 
-/** not_found: no such place (for this booker). not_allowed: policy says no (too late, inactive). invalid: bad name/email. duplicate: already on the booking. */
-export type TransferErrorCode = "not_found" | "not_allowed" | "invalid" | "duplicate";
+/**
+ * not_found: no such place (for this booker). not_allowed: policy says no (too late, inactive).
+ * invalid: bad name/email. duplicate: already on the booking. limit: MAX_TRANSFERS reached.
+ */
+export type TransferErrorCode = "not_found" | "not_allowed" | "invalid" | "duplicate" | "limit";
+
+/** Self-service transfers per booking (beyond that, message Tanya). */
+export const MAX_TRANSFERS = 3;
 
 export class TransferError extends Error {
   constructor(public readonly code: TransferErrorCode) {
@@ -48,6 +54,7 @@ type Row = {
   booker_person_id: string;
   booker_name: string;
   status: string;
+  transfer_count: number;
   title: string;
   start_at: string | Date | null;
   timezone: string;
@@ -79,7 +86,7 @@ export async function transferSpot(
   try {
     const r = await db.query<Row>(
       `select g.booking_id, g.person_id as old_person, op.name as old_name, op.email as old_email,
-              b.booker_person_id, bp.name as booker_name, b.status, e.title, e.start_at, e.timezone, e.type,
+              b.booker_person_id, bp.name as booker_name, b.status, b.transfer_count, e.title, e.start_at, e.timezone, e.type,
               coalesce(b.policy_snapshot->>'template', e.policy_template) as template
          from booking_guests g
          join bookings b on b.id = g.booking_id
@@ -97,6 +104,7 @@ export async function transferSpot(
       (row.status === "paid" || row.status === "deposit_paid") &&
       transferAllowed(row.type, row.template, row.start_at ? new Date(row.start_at).toISOString() : null, now);
     if (!allowed) throw new TransferError("not_allowed");
+    if (row.transfer_count >= MAX_TRANSFERS) throw new TransferError("limit");
     const dup = await db.query<{ n: number }>(
       `select count(*)::int as n from booking_guests g join people p on p.id = g.person_id
         where g.booking_id = $1 and lower(p.email) = $2`,
@@ -108,6 +116,7 @@ export async function transferSpot(
       "update booking_guests set person_id = $2, is_booker = false, details_complete = false, checked_in_at = null where id = $1",
       [bookingGuestId, personId],
     );
+    await db.query("update bookings set transfer_count = transfer_count + 1 where id = $1", [row.booking_id]);
     await db.query("commit");
   } catch (err) {
     await db.query("rollback").catch(() => {});

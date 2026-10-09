@@ -1,6 +1,6 @@
 import type { SqlClient } from "../content/sync";
 import { refId, type ChargeRef, type StripeApi } from "./client";
-import { bookingInvoices, voidOpenInvoices } from "./invoices";
+import { bookingInvoices, voidOrDeleteInvoices } from "./invoices";
 
 /** One card refund of a cancellation: what goes back to that charge, after its own fee. */
 export interface CardRefund {
@@ -93,10 +93,22 @@ export async function issuePendingRefunds(db: SqlClient, stripe: StripeApi, book
   );
   for (const row of rows.rows) {
     try {
-      const refund = await stripe.refunds.create(
-        { charge: row.charge_id, amount: row.amount_minor, metadata: { kind: "cancellation", booking_id: bookingId } },
-        { idempotencyKey: `efzin-cancel-${bookingId}-${row.charge_id}` },
+      // A refund made earlier whose id was never stored (e.g. the write failed) is adopted, so a
+      // retry after Stripe's 24-hour idempotency window cannot refund twice.
+      const existing = await stripe.refunds.list({ charge: row.charge_id, limit: 100 });
+      const earlier = existing.data.find(
+        (r) =>
+          r.metadata?.kind === "cancellation" &&
+          r.metadata?.booking_id === bookingId &&
+          r.status !== "failed" &&
+          r.status !== "canceled",
       );
+      const refund =
+        earlier ??
+        (await stripe.refunds.create(
+          { charge: row.charge_id, amount: row.amount_minor, metadata: { kind: "cancellation", booking_id: bookingId } },
+          { idempotencyKey: `efzin-cancel-${bookingId}-${row.charge_id}` },
+        ));
       await db.query("update booking_refunds set refund_id = $2, refunded_at = now() where id = $1", [row.id, refund.id]);
     } catch (err) {
       problems.push(`refund of ${row.amount_minor} on ${row.charge_id} failed: ${errText(err)}`);
@@ -156,9 +168,9 @@ export async function settleCancellation(db: SqlClient, stripe: StripeApi | null
   }
   const problems = await issuePendingRefunds(db, stripe, bookingId);
   try {
-    await voidOpenInvoices(stripe, await bookingInvoices(db, bookingId));
+    await voidOrDeleteInvoices(stripe, await bookingInvoices(db, bookingId));
   } catch (err) {
-    problems.push(`voiding open invoices failed: ${errText(err)}`);
+    problems.push(`voiding open / deleting draft invoices failed: ${errText(err)}`);
   }
   try {
     await expireOpenSessions(db, stripe, bookingId);

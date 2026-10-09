@@ -63,6 +63,7 @@ const TRANSFER_MESSAGES: Record<string, string> = {
   not_allowed: "This place can no longer be transferred under your booking's policy.",
   invalid: "Please enter the new guest's name and a valid email address.",
   duplicate: "That person is already on this booking.",
+  limit: "Places on this booking have been transferred 3 times already. Please message Tanya for any further change.",
 };
 
 export async function transferAction(_prev: FormState, form: FormData): Promise<FormState> {

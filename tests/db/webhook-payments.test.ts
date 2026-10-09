@@ -98,15 +98,17 @@ describe("scheduled payments", () => {
     expect(String(w.emails[0].data.problem)).toBe("Stripe still retrying invoice in_evt_f for an inactive booking");
   });
 
-  it("ignores invoice events for cancelled bookings: a payment only alerts Tanya to refund", async () => {
+  it("a payment on a cancelled booking changes nothing on the booking; it is refunded and Tanya told", async () => {
     const { bookingId, items } = await planBooking(w);
     await w.db.query("update bookings set status = 'cancelled'");
+    w.stripe.invoicePaymentIntent.in_evt_p = "pi_late";
     await handleStripeEvent(invoiceEvent("evt_p", "invoice.paid", items[1].id, bookingId), w.deps);
     expect(await item(items[1].id)).toMatchObject({ status: "scheduled", attempts: 0 });
     expect(await bookingStatus(bookingId)).toBe("cancelled");
+    expect(w.stripe.refundsCreated).toHaveLength(1);
     expect(w.emails).toHaveLength(1);
     expect(w.emails[0].kind).toBe("admin_error");
-    expect(String(w.emails[0].data.problem)).toBe(`Payment received on cancelled booking ${bookingId}; refund needed`);
+    expect(w.emails[0].data.context).toBe("payment_on_inactive_booking_refunded");
   });
 
   it("ignores invoices that are not scheduled payments", async () => {

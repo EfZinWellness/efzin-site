@@ -180,6 +180,11 @@ export class FakeStripe implements StripeApi {
     retrieve: async (id: string) => ({ id, payment_method: { id: `pm_of_${id}` } }),
   };
 
+  /** Runs inside invoices.create, after the draft exists and before it is returned (race tests). */
+  onInvoiceCreate: (() => Promise<void>) | null = null;
+  /** Draft invoices deleted (invoices.del). */
+  deletedInvoices: string[] = [];
+
   invoices = {
     create: async (params: Stripe.InvoiceCreateParams) => {
       const id = `in_test_${this.invoicesCreated.length + 1}`;
@@ -187,7 +192,18 @@ export class FakeStripe implements StripeApi {
       this.invoiceStatus[id] = "draft";
       this.invoiceTotal[id] = 0;
       if (params.customer) this.invoiceCustomer[id] = params.customer;
+      if (this.onInvoiceCreate) {
+        const hook = this.onInvoiceCreate;
+        this.onInvoiceCreate = null;
+        await hook();
+      }
       return { id };
+    },
+    del: async (id: string) => {
+      if (this.invoiceStatus[id] !== "draft") throw new Error(`Only draft invoices can be deleted (${id})`);
+      this.deletedInvoices.push(id);
+      delete this.invoiceStatus[id];
+      return { id, deleted: true as const };
     },
     retrieve: async (id: string) => ({
       id,
@@ -249,7 +265,20 @@ export class FakeStripe implements StripeApi {
   /** Idempotency keys seen by refunds.create (like Stripe: same params → same refund, else an error). */
   refundIdempotency = new Map<string, { params: string; result: { id: string } }>();
 
+  /** Refunds Stripe already has (from the dashboard or an earlier run), listed by refunds.list. */
+  existingRefunds: { id: string; charge: string; amount: number; status: string; metadata: Record<string, string> }[] = [];
+
   refunds = {
+    list: async (params: Stripe.RefundListParams) => {
+      const made = this.refundsCreated.map((r, i) => ({
+        id: `re_test_${i + 1}`,
+        charge: r.params.charge ?? null,
+        status: "succeeded",
+        metadata: (r.params.metadata ?? {}) as Record<string, string>,
+      }));
+      const all = [...this.existingRefunds, ...made].filter((r) => !params.charge || r.charge === params.charge);
+      return { data: all.map(({ id, status, metadata }) => ({ id, status, metadata })), has_more: false };
+    },
     create: async (params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions) => {
       if (this.refundError) {
         const e = this.refundError;

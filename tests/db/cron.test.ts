@@ -320,6 +320,27 @@ describe("daily job: unpaid at the balance due date", () => {
     expect(sent.find((s) => s.to === "eve@x.com")!.text).toContain("AED 52");
   });
 
+  it("within 48h of an event the policy offers credit, not a refund: the unpaid cancellation issues the credit", async () => {
+    const b = await seedBooking(w.db, {
+      slug: "test-event",
+      status: "deposit_paid",
+      booker: { name: "Eve E", email: "eve@x.com", customer: "cus_ev" },
+      items: [
+        { seq: 0, dueOn: "2027-01-10", amount: 5600, status: "paid" },
+        { seq: 1, dueOn: "2027-01-28", amount: 22400, status: "failed", invoice: "in_ev" },
+      ],
+    });
+    w.stripe.invoiceStatus.in_ev = "open";
+    // 2027-01-31 06:00 Dubai: the event starts 28 hours later.
+    await runDaily(w.db, at("2027-01-31"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("credited");
+    const c = (await w.db.query<{ amount_aed_minor: number; code: string }>("select amount_aed_minor, code from credits")).rows;
+    expect(c.map((x) => x.amount_aed_minor)).toEqual([5600]);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    const guestMail = sent.find((s) => s.to === "eve@x.com" && s.kind === "booking_cancelled_unpaid")!;
+    expect(guestMail.text).toContain(c[0].code);
+  });
+
   it("a cancellation notice that failed to send is sent on the next run, exactly once", async () => {
     const b = await attemptedAndFailed();
     fail(true);

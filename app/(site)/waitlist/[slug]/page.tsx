@@ -15,8 +15,8 @@ export async function generateMetadata({ params }: PageProps<"/waitlist/[slug]">
 }
 
 const RESULTS: Record<string, string> = {
-  joined: "You're on the waitlist. We'll email you as soon as a place opens up; places go to whoever books first.",
-  already: "You're already on the waitlist for this one. We'll email you if a place opens up.",
+  joined: "Thank you. If there's space, we'll email you; places go to whoever books first.",
+  already: "Thank you. If there's space, we'll email you; places go to whoever books first.",
   available: "Good news: there are places available right now.",
   closed: "This experience isn't taking bookings any more.",
   error: "Something went wrong. Please check your details and try again.",

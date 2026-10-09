@@ -52,8 +52,11 @@ async function main(): Promise<number> {
     for (const o of result.outcomes) {
       console.log(`${o.bookingId}: ${o.status}${o.problems.length ? ` (problems: ${o.problems.join("; ")})` : ""}`);
     }
-    console.log(`${result.bookings} booking(s) cancelled. Now set the experience's status in its content file and sync.`);
-    return result.outcomes.some((o) => o.problems.length > 0) ? 1 : 0;
+    for (const f of result.failures) console.error(`${f.bookingId}: NOT cancelled (${f.error})`);
+    console.log(
+      `${result.outcomes.length} of ${result.bookings} booking(s) cancelled. Now set the experience's status in its content file and sync.`,
+    );
+    return result.failures.length > 0 || result.outcomes.some((o) => o.problems.length > 0) ? 1 : 0;
   } finally {
     conn.release();
     await pool.end();

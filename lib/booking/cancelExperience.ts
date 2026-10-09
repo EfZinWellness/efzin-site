@@ -2,7 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SqlClient } from "../content/sync";
 import { renderEmail } from "../email/render";
-import type { SendEmailFn } from "../email/send";
+import { sendQuietly, type SendEmailFn } from "../email/send";
+import { adminAddress } from "../requests/handlers";
 import type { StripeApi } from "../stripe/client";
 import { cancelBooking, type CancelOutcome } from "./cancel";
 
@@ -18,6 +19,8 @@ export interface CancelExperienceResult {
   bookings: number;
   previewFile: string | null;
   outcomes: CancelOutcome[];
+  /** Bookings that could not be cancelled (left unchanged). */
+  failures: { bookingId: string; error: string }[];
 }
 
 type Row = {
@@ -101,20 +104,34 @@ export async function runCancelExperience(
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `cancel-${slug}-${opts.now.toISOString().replace(/[:.]/g, "-")}.txt`);
     writeFileSync(file, `${lines.join("\n")}\n`, "utf8");
-    return { bookings: rows.length, previewFile: file, outcomes: [] };
+    return { bookings: rows.length, previewFile: file, outcomes: [], failures: [] };
   }
 
   const outcomes: CancelOutcome[] = [];
+  const failures: { bookingId: string; error: string }[] = [];
   for (const b of rows) {
-    outcomes.push(
-      await cancelBooking(db, stripe, b.id, "refund", "efzin", opts.now, {
-        sendEmail: opts.sendEmail,
-        origin: opts.origin,
-        notifyWaitlist: false,
-      }),
-    );
+    // One booking failing (e.g. a Stripe error while reading its charges, which rolls that
+    // booking back) never stops the others; the failures are reported and can be re-run.
+    try {
+      outcomes.push(
+        await cancelBooking(db, stripe, b.id, "refund", "efzin", opts.now, {
+          sendEmail: opts.sendEmail,
+          origin: opts.origin,
+          notifyWaitlist: false,
+        }),
+      );
+    } catch (err) {
+      failures.push({ bookingId: b.id, error: err instanceof Error ? err.message : String(err) });
+    }
   }
-  return { bookings: rows.length, previewFile: null, outcomes };
+  if (failures.length > 0) {
+    await sendQuietly(opts.sendEmail, "admin_error", adminAddress(), {
+      context: "cancel_experience_failed",
+      problem: `Cancelling ${slug}: ${failures.length} booking(s) could not be cancelled and were left unchanged. Run --send again to retry them.`,
+      failures: failures.map((f) => `${f.bookingId}: ${f.error}`),
+    });
+  }
+  return { bookings: rows.length, previewFile: null, outcomes, failures };
 }
 
 /** What was paid by card, in the base currency (paid minus gift and credit). */

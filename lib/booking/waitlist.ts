@@ -30,7 +30,7 @@ export async function joinWaitlist(
 ): Promise<JoinResult> {
   const t = await ticketInfo(db, ticketTypeId);
   if (!t || !open(t, now)) return "closed";
-  if (t.status === "on_sale" && t.spots > 0) return "available";
+  if (t.spots > 0) return "available";
   const r = await db.query<{ id: string }>(
     `insert into waitlist (ticket_type_id, name, email, position, created_at)
      values ($1, $2, lower($3), (select coalesce(max(position), 0) + 1 from waitlist where ticket_type_id = $1), $4)
@@ -47,14 +47,15 @@ export interface WaitlistDeps {
 }
 
 /**
- * When the ticket has spots and is on sale, emails everyone on its waitlist not yet notified
+ * When the ticket has spots (content on sale or marked sold out: booking is open for both and
+ * the hold enforces capacity), emails everyone on its waitlist not yet notified
  * (first come, first served at checkout). Each email is claimed in email_log under
  * `waitlist:<ticket>` and the entry marked notified once sent; a failed send stays un-notified
  * and is retried by the next call. Returns how many were emailed.
  */
 export async function notifyWaitlist(db: SqlClient, ticketTypeId: string, deps: WaitlistDeps): Promise<number> {
   const t = await ticketInfo(db, ticketTypeId);
-  if (!t || t.status !== "on_sale" || !open(t, deps.now) || t.spots <= 0) return 0;
+  if (!t || !open(t, deps.now) || t.spots <= 0) return 0;
   const rows = await db.query<{ id: string; name: string | null; email: string }>(
     `select id, name, email from waitlist
       where ticket_type_id = $1 and notified_at is null and email is not null order by position, created_at`,
@@ -108,5 +109,7 @@ export async function handleWaitlist(body: unknown, deps: { db: SqlClient | null
     [slug, ticket || null],
   );
   if (!t.rows[0]) return { status: 404, error: "We couldn't find that experience." };
-  return { status: 200, result: await joinWaitlist(deps.db, t.rows[0].id, { name, email }, deps.now), slug };
+  const result = await joinWaitlist(deps.db, t.rows[0].id, { name, email }, deps.now);
+  // The same answer whether or not the email was already on the list (reveals nothing about others).
+  return { status: 200, result: result === "already" ? "joined" : result, slug };
 }

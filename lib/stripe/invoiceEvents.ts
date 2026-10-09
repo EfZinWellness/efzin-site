@@ -3,6 +3,7 @@ import type { SqlClient } from "../content/sync";
 import { sendQuietly } from "../email/send";
 import { balanceDueDate } from "../payments/schedule";
 import { adminAddress } from "../requests/handlers";
+import { refId } from "./client";
 import type { AfterCommit } from "./events";
 import type { WebhookDeps } from "./handlers";
 import { ACTIVE_BOOKING } from "./invoices";
@@ -83,14 +84,7 @@ export async function onInvoicePaid(invoice: Stripe.Invoice, deps: WebhookDeps):
       { ...facts, paidInvoiceId: item.stripe_invoice_id, amountPaid: invoice.amount_paid, currency: invoice.currency },
     );
   }
-  if (!locked.active) {
-    return alertTanya(deps, "payment_on_inactive_booking", `Payment received on cancelled booking ${item.booking_id}; refund needed`, {
-      ...facts,
-      bookingStatus: item.booking_status,
-      amountPaid: invoice.amount_paid,
-      currency: invoice.currency,
-    });
-  }
+  if (!locked.active) return refundInactiveInvoice(invoice, item, deps);
   if (invoice.amount_paid !== item.amount_minor || invoice.currency?.toLowerCase() !== item.currency.toLowerCase()) {
     return alertTanya(
       deps,
@@ -124,6 +118,62 @@ export async function onInvoicePaid(invoice: Stripe.Invoice, deps: WebhookDeps):
       remainingMinor: remaining,
       bookingId: item.booking_id,
     });
+  };
+}
+
+/**
+ * A scheduled payment that arrived after the booking stopped being active (cancelled, refunded,
+ * credited): nothing changes on the booking and the payment is refunded in full, once. The
+ * invoice is recorded in invoice_refunds when first seen; the refund (idempotency key per
+ * invoice, and an earlier refund with our metadata is adopted) runs after the commit, its id is
+ * stored, and Tanya is told. A repeat of the event after the refund id is stored does nothing.
+ */
+async function refundInactiveInvoice(invoice: Stripe.Invoice, item: ItemRow, deps: WebhookDeps): Promise<AfterCommit | void> {
+  const { db } = deps;
+  const rec = await db.query<{ refund_id: string | null }>(
+    `insert into invoice_refunds (invoice_id, booking_id, amount_minor, currency) values ($1, $2, $3, $4)
+     on conflict (invoice_id) do update set invoice_id = excluded.invoice_id returning refund_id`,
+    [invoice.id, item.booking_id, invoice.amount_paid, invoice.currency?.toUpperCase() ?? null],
+  );
+  if (rec.rows[0].refund_id) return;
+  const facts = {
+    invoiceId: invoice.id,
+    bookingId: item.booking_id,
+    itemId: item.id,
+    bookingStatus: item.booking_status,
+    amountPaid: invoice.amount_paid,
+    currency: invoice.currency,
+  };
+  return async () => {
+    const metadata = { kind: "inactive_invoice", booking_id: item.booking_id, invoice_id: invoice.id };
+    try {
+      const payments = await deps.stripe.invoicePayments.list({ invoice: invoice.id, status: "paid", limit: 10 });
+      const pi = refId(payments.data[0]?.payment.payment_intent ?? null);
+      if (!pi) throw new Error(`No payment found for invoice ${invoice.id}`);
+      const earlier = (await deps.stripe.refunds.list({ payment_intent: pi, limit: 100 })).data.find(
+        (r) => r.metadata?.kind === metadata.kind && r.metadata?.invoice_id === invoice.id && r.status !== "failed" && r.status !== "canceled",
+      );
+      const refund =
+        earlier ??
+        (await deps.stripe.refunds.create(
+          { payment_intent: pi, amount: invoice.amount_paid, metadata },
+          { idempotencyKey: `efzin-inactive-invoice-refund-${invoice.id}` },
+        ));
+      await db.query("update invoice_refunds set refund_id = $2 where invoice_id = $1", [invoice.id, refund.id]);
+      await alertTanya(
+        deps,
+        "payment_on_inactive_booking_refunded",
+        `A scheduled payment was taken on booking ${item.booking_id} after it was cancelled. It was refunded in full automatically.`,
+        { ...facts, refundId: refund.id },
+      )();
+    } catch (err) {
+      await alertTanya(
+        deps,
+        "payment_on_inactive_booking_refund_failed",
+        `Payment received on cancelled booking ${item.booking_id}; the automatic refund failed, please refund it by hand.`,
+        { ...facts, error: err instanceof Error ? err.message : String(err) },
+      )();
+    }
   };
 }
 

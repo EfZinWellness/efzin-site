@@ -74,9 +74,10 @@ describe("validateBooking", () => {
     expect(fail(twoFriends).join(" ")).toMatch(/same email/i);
   });
 
-  it("rejects an ended experience and one that is not on sale", () => {
+  it("rejects an ended experience and one that is not on sale; sold_out content is accepted (the hold enforces capacity)", () => {
     expect(fail(validateBooking(req(), retreat(), new Date("2027-06-15T00:00:00Z"))).join(" ")).toMatch(/not available/i);
-    expect(fail(validateBooking(req(), retreat({ status: "sold_out" }), NOW)).join(" ")).toMatch(/not available/i);
+    expect(fail(validateBooking(req(), retreat({ status: "interest" }), NOW)).join(" ")).toMatch(/not available/i);
+    expect(validateBooking(req(), retreat({ status: "sold_out" }), NOW).ok).toBe(true);
   });
 
   it("rejects instalments when they are not available", () => {

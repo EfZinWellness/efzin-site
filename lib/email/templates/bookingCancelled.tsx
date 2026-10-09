@@ -21,7 +21,9 @@ export const bookingCancelled: EmailTemplate = {
   subject: (d) =>
     d.byEfzin === true
       ? `${str(d.experience) || "Your Ef Zin experience"} has been cancelled`
-      : `Your booking for ${str(d.experience) || "Ef Zin"} is cancelled`,
+      : d.forGuest === true
+        ? `Your place at ${str(d.experience) || "Ef Zin"} has been cancelled`
+        : `Your booking for ${str(d.experience) || "Ef Zin"} is cancelled`,
   body: (d) => {
     const experience = str(d.experience) || "your experience";
     const card = cardLine(d.cardRefunds);
@@ -52,6 +54,17 @@ export const bookingCancelled: EmailTemplate = {
             </>
           )}
           <Small>With love, Tanya and the Ef Zin team.</Small>
+        </Layout>
+      );
+    }
+    if (d.forGuest === true) {
+      const booker = str(d.bookerName) || "The person who booked your place";
+      return (
+        <Layout preview="Your place has been cancelled." title="Your place has been cancelled">
+          <P>{greeting(d.name)}</P>
+          <P>{booker} has cancelled the booking for {experience}, so your place is cancelled too.</P>
+          <Facts rows={[["Experience", str(d.experience)], ["When", when(d.startsAt, d.timezone)]]} />
+          <Small>We hope to see you at another Ef Zin experience soon. Questions? Just reply to this email.</Small>
         </Layout>
       );
     }

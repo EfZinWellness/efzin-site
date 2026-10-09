@@ -71,7 +71,10 @@ export function validateBooking(req: unknown, exp: Experience, now: Date): Resul
   const errors: string[] = [];
 
   if (v.slug !== exp.slug) errors.push("This booking is for a different experience");
-  if (effectiveStatus(exp, now) !== "on_sale" || Date.parse(exp.endsAt) <= now.getTime()) {
+  // Sold-out content stays bookable: a cancellation frees spots (the waitlist is told) and the
+  // hold refuses anything beyond the real capacity.
+  const st = effectiveStatus(exp, now);
+  if ((st !== "on_sale" && st !== "sold_out") || Date.parse(exp.endsAt) <= now.getTime()) {
     errors.push("This experience is not available for booking");
   }
 

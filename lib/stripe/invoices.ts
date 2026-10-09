@@ -88,9 +88,12 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
     if (inv.status === "open") {
       // Finalized but never paid by us (e.g. stopped before pay). Failed items are Stripe's to retry;
       // pay-by-link invoices are the guest's to pay (make sure the link went out).
-      if (collection === "send_invoice" && item.status === "scheduled") return attempted(await send(stripe, invoiceId, key));
+      const id = invoiceId;
+      if (collection === "send_invoice" && item.status === "scheduled") {
+        return whileStillDue(db, stripe, item.booking_id, itemId, id, async () => attempted(await send(stripe, id, key)));
+      }
       if (collection !== "charge_automatically" || item.status !== "scheduled") return { status: "skipped" };
-      return attempted(await pay(stripe, invoiceId, key));
+      return whileStillDue(db, stripe, item.booking_id, itemId, id, async () => attempted(await pay(stripe, id, key)));
     }
     if (inv.status !== "draft") return { status: "skipped" };
     if (inv.total !== 0 && inv.total !== item.amount_minor) {
@@ -141,9 +144,44 @@ export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, item
       key("line"),
     );
   }
-  await stripe.invoices.finalizeInvoice(invoiceId, { auto_advance: true }, key("finalize"));
-  if (collection !== "charge_automatically") return attempted(await send(stripe, invoiceId, key));
-  return attempted(await pay(stripe, invoiceId, key));
+  const id = invoiceId;
+  return whileStillDue(db, stripe, item.booking_id, itemId, id, async () => {
+    await stripe.invoices.finalizeInvoice(id, { auto_advance: true }, key("finalize"));
+    if (collection !== "charge_automatically") return attempted(await send(stripe, id, key));
+    return attempted(await pay(stripe, id, key));
+  });
+}
+
+/**
+ * Runs the finalize/pay/send step only if the booking is still part paid and the item still
+ * unpaid, re-checked under row locks (booking first, as cancellation takes them) that are held
+ * until the step is done, so a cancellation can't commit in between. Otherwise this item's own
+ * invoice is deleted (draft) or voided (open) and nothing is charged.
+ */
+async function whileStillDue(
+  db: SqlClient,
+  stripe: StripeApi,
+  bookingId: string,
+  itemId: string,
+  invoiceId: string,
+  step: () => Promise<ChargeResult>,
+): Promise<ChargeResult> {
+  await db.query("begin");
+  try {
+    const b = await db.query<{ status: string }>("select status from bookings where id = $1 for update", [bookingId]);
+    const i = await db.query<{ status: string }>("select status from payment_schedule_items where id = $1 for update", [itemId]);
+    if (b.rows[0]?.status !== "deposit_paid" || !["scheduled", "failed"].includes(i.rows[0]?.status ?? "")) {
+      await db.query("commit");
+      await voidOrDeleteInvoices(stripe, [invoiceId]);
+      return { status: "skipped" };
+    }
+    const out = await step();
+    await db.query("commit");
+    return out;
+  } catch (err) {
+    await db.query("rollback").catch(() => {});
+    throw err;
+  }
 }
 
 /** Emails a finalized pay-by-link invoice to the guest (Stripe's hosted pay page). */
@@ -185,5 +223,15 @@ export async function voidOpenInvoices(stripe: StripeApi, invoiceIds: (string | 
     if (!id) continue;
     const inv = await stripe.invoices.retrieve(id);
     if (inv.status === "open") await stripe.invoices.voidInvoice(id);
+  }
+}
+
+/** Voids the open ones and deletes the drafts (which can't be voided), so none can ever be charged. */
+export async function voidOrDeleteInvoices(stripe: StripeApi, invoiceIds: (string | null)[]): Promise<void> {
+  for (const id of invoiceIds) {
+    if (!id) continue;
+    const inv = await stripe.invoices.retrieve(id);
+    if (inv.status === "open") await stripe.invoices.voidInvoice(id);
+    else if (inv.status === "draft") await stripe.invoices.del(id);
   }
 }

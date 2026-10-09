@@ -85,10 +85,16 @@ export interface StripeApi {
       options?: Stripe.RequestOptions,
     ): Promise<{ id: string }>;
     voidInvoice(id: string): Promise<{ id: string }>;
+    /** Deletes a draft invoice (drafts cannot be voided). */
+    del(id: string): Promise<{ id: string }>;
     list(params: Stripe.InvoiceListParams): Promise<{ data: { id: string }[]; has_more: boolean }>;
     update(id: string, params: Stripe.InvoiceUpdateParams): Promise<{ id: string }>;
   };
   refunds: {
+    list(params: Stripe.RefundListParams): Promise<{
+      data: { id: string; status: string | null; metadata: Stripe.Metadata | null }[];
+      has_more: boolean;
+    }>;
     create(params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions): Promise<{ id: string }>;
   };
   invoiceItems: {
