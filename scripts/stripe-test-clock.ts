@@ -77,24 +77,19 @@ const fromUnix = (s: number) => new Date(s * 1000).toISOString().slice(0, 16).re
 async function setup(stripe: Stripe, a: Args): Promise<void> {
   const frozen = a.start ? toUnix(a.start) : Math.floor(Date.now() / 1000);
   const clock = await stripe.testHelpers.testClocks.create({ frozen_time: frozen, name: `efzin-plan-${Date.now()}` });
-  const customer = await stripe.customers.create({
-    name: a.name,
-    email: `plan-tester+${Date.now()}@example.com`,
-    test_clock: clock.id,
-  });
-  const pm = await stripe.paymentMethods.attach(CARDS[a.card].pm, { customer: customer.id });
-  await stripe.customers.update(customer.id, { invoice_settings: { default_payment_method: pm.id } });
   const first = a.start ?? new Date(clock.frozen_time * 1000).toISOString().slice(0, 10);
   console.log(`
 Test clock ready (TEST mode).
   clock     ${clock.id}   (frozen at ${fromUnix(clock.frozen_time)})
-  customer  ${customer.id}   (${a.name})
   card      ${CARDS[a.card].label}
 
+One clock per booking scenario: a clock holds only a small number of customers (3 at time of writing),
+so run "setup" again for each new scenario instead of reusing one clock.
+
 How the site uses it
-  1. In Vercel (staging / Preview environment) set  STRIPE_TEST_CLOCK_ID=${clock.id}  and redeploy.
-     Every NEW Stripe customer the site creates is then attached to this clock (test keys only).
-     Book with a NEW email so the site creates a fresh Stripe customer.
+  1. In Vercel (staging / Preview environment) set  STRIPE_TEST_CLOCK_ID=${clock.id}  and redeploy
+     (changed settings only apply to a new deployment). Every NEW Stripe customer the site creates is then
+     attached to this clock (test keys only). Book with a NEW email so the site creates a fresh customer.
   2. Book the monthly-plan retreat on the staging site. In Stripe Checkout use the card above:
      ${CARDS[a.card].number}, any future expiry, any CVC. (The failing card saves fine at checkout and
      declines on the later charges, which is the point of the scenario.)
@@ -112,7 +107,7 @@ How the site uses it
   6. In My Ef Zin open the booking, choose Update card, enter 4242 4242 4242 4242. The failed instalment is
      collected on the new card. Then try Pay the rest now for what remains.
   7. When done, delete the clock in the Stripe dashboard (Test mode > Developers > Test clocks); that removes
-     its customers too. Remove STRIPE_TEST_CLOCK_ID from Vercel.
+     its customers too. Then UNSET STRIPE_TEST_CLOCK_ID in Vercel and redeploy (a deleted clock makes new bookings fail).
 
 Planned dates (deposit on the clock's date, then monthly):
   ${planDates(first, 5).join("  ")}

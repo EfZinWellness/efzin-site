@@ -21,8 +21,8 @@ Nothing here needs you to write code. When a step says "paste into Vercel", Clau
 - [ ] **[Tanya] Vercel Pro** (hosting). Pro is needed because the site's scheduled jobs run hourly, and the free plan only allows daily jobs. Sign up at vercel.com and choose Pro.
 - [ ] **[Tanya] Supabase** (database and sign-in). Two projects: `efzin-staging` and `efzin-prod`. Upgrade `efzin-prod` to **Pro** (Settings > Billing). Pro is what gives automatic daily backups, so we do not lose guest or booking records.
 - [ ] **[Tanya] Stripe**. Your existing account. Use **test mode** (toggle top right) for staging. Live keys only on launch day.
-- [ ] **[Tanya] Resend** (email sending), plus access to wherever your domain's DNS is managed (see I2).
-- [ ] **[Tanya] Google Cloud** project for "Sign in with Google" (a free OAuth client; see B3).
+- [ ] **[Tanya] Resend** (email sending), plus access to wherever your domain's DNS is managed (see I2). Domain verification is in A3 and must be finished before testing.
+- [ ] **[Tanya] Google Cloud** project for "Sign in with Google" (a free OAuth client; see B3). Before creating the client, set up the **OAuth consent screen**: Google Cloud console > APIs & Services > OAuth consent screen > External; app name "Ef Zin", support email `contact@efzinwellness.com`, authorised domain `efzinwellness.com`, developer contact email; scopes `openid`, `email`, `profile` (the defaults) only; then **Publish app** so any guest, not just test users, can sign in.
 - [ ] **[Tanya] GitHub** (already done): `github.com/EfZinWellness/efzin-site`.
 
 ### A2. Every setting the site reads (the "environment variables")
@@ -44,12 +44,21 @@ These are entered once in Vercel (Project > Settings > Environment Variables). F
 | `CRON_SECRET` | Password the scheduled jobs use. Vercel sends it automatically. | Make up a long random string (Claude can generate one). Use a different one per environment. | yes | yes |
 | `STRIPE_TEST_CLOCK_ID` | Staging only: lets the payment-plan test move Stripe's clock | Printed by the test-clock script in F2 | only while testing | **never** |
 
-For the automated staging test (F1), Claude also uses these **on your computer only**, not in Vercel: `E2E_STAGING_URL`, `EFZIN_E2E_ADMIN_EMAIL`, plus the staging `STRIPE_SECRET_KEY`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+For the automated staging test (F1), Claude also uses these **on your computer only**, not in Vercel: `E2E_STAGING_URL`, `E2E_STAGING_SLUG`, `EFZIN_E2E_ADMIN_EMAIL`, plus the staging `STRIPE_SECRET_KEY`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 
 Not for Vercel: `EFZIN_FAKE_USD_RATES`, `EFZIN_EXTRA_CONTENT_DIR`, `EFZIN_TEST_AUTH_EMAIL`, `EFZIN_FAKE_BOOKING_STATUS`. These are for the automated tests on a developer's computer.
 
 - [ ] **[Tanya]** Staging values collected and pasted into Vercel for the **Preview** environment.
 - [ ] **[Tanya]** Production values pasted into Vercel for **Production** later, at section I (not before).
+
+### A3. Resend: verify the sending domain (do this now, before any testing)
+
+**No emails from the site are sent until `efzinwellness.com` is verified in Resend.** That means no booking confirmations, receipts, gift cards, reminders or admin alerts on staging or on the live site, and the staging tests in F cannot pass their email checks. Verify the domain once; the same verification serves staging and production.
+
+- [ ] **[Tanya, with Claude guiding on screen]** Resend > Domains > Add Domain > `efzinwellness.com`. Resend then shows a short list of DNS records (a DKIM record, an SPF record and a "return-path" MX record, normally on a `send.` sub-address).
+- [ ] **[Tanya, with Claude guiding]** Add exactly those records at wherever the domain's DNS lives (probably Squarespace Domains, formerly Google Domains; see I2 for how to find it). Adding them does **not** touch the website or your inbox: leave every existing record (especially MX, SPF and DKIM for your normal email) as it is. If an SPF record already exists for the main domain, don't add a second one for the same name; ask Claude.
+- [ ] **[Tanya]** Back in Resend click Verify and wait for "Verified" (minutes to hours). Create the API key (A2) after that.
+- [ ] **[Claude]** Send one test email from the site (the contact form) and check it arrives and isn't in spam. Emails are sent from `Ef Zin <hello@efzinwellness.com>`.
 
 ---
 
@@ -64,6 +73,9 @@ Do this once for `efzin-staging`, and again for `efzin-prod` before launch. The 
 - [ ] **[Both]** Authentication > URL configuration: **Site URL** = the origin of that environment. **Redirect URLs** = `<origin>/account/auth/callback`, `<origin>/account/auth/confirm`, `<origin>/account`.
 - [ ] **[Tanya]** Authentication > Providers > **Google**: paste the Google client ID and secret (B3).
 - [ ] **[Tanya]** `efzin-prod` only: upgrade to **Pro** for backups, and check Database > Backups shows daily backups.
+- [ ] **[Both]** **Sign-in emails: use Resend's mail server in Supabase.** Supabase's built-in mailer is heavily rate-limited (a handful of emails an hour) and not meant for real guests. After A3 is verified: Supabase > Authentication > Emails > SMTP Settings > turn on **Custom SMTP** with: host `smtp.resend.com`, port `465`, username `resend`, password = a Resend API key (create a separate key just for this), sender email `hello@efzinwellness.com`, sender name `Ef Zin`. Save, then request a sign-in link at `/account/signin` and check it arrives.
+
+**Which emails go through which system.** Supabase sends only the **"email me a sign-in link"** message that a member requests on the sign-in page (the Magic Link template above). Everything else is sent by the site itself through Resend: booking confirmations and the **account-claim link** in them (the site asks Supabase for the link, then puts it in its own email), receipts, reminders, gift cards, cancellations and admin alerts. So the SMTP setting fixes sign-in link requests; `RESEND_API_KEY` in Vercel handles the rest.
 
 ### B3. Google sign-in
 
@@ -95,7 +107,7 @@ Claude does these with the staging connection details. (Production repeats them 
   - `invoice.overdue`
   - `charge.refunded`
 
-  (Optional but harmless: `checkout.session.async_payment_succeeded`, which the site also understands.) Copy the signing secret into `STRIPE_WEBHOOK_SECRET` in Vercel for that environment.
+  Copy the signing secret into `STRIPE_WEBHOOK_SECRET` in Vercel for that environment.
 - [ ] **[Tanya]** Settings > Payments > **Adaptive Pricing: ON** (guests see prices in their own currency). Already done for test mode; do it again in live mode.
 - [ ] **[Both]** **Check Adaptive Pricing really works** alongside the saved card for payment plans: in F2, book a payment-plan retreat from a UK/EU-looking browser and confirm Checkout shows the deposit in GBP/EUR. If it only shows AED, the deposit is simply charged in AED; later instalments are still charged in the guest's currency. Tell Claude either way.
 - [ ] **[Tanya]** Settings > Billing > Invoices (and Customer emails): switch **on** "Email finalised invoices and credit notes to customers" / "Send invoice emails". This is how guests without a saved card get a pay link.
@@ -106,12 +118,13 @@ Claude does these with the staging connection details. (Production repeats them 
 
 ## E. Vercel
 
-- [ ] **[Both]** vercel.com > Add New > Project > import `EfZinWellness/efzin-site`. Set the **Production Branch** to `main` for now. The `phase1` branch builds a **Preview** (this is staging). Keep Framework: Next.js.
+- [ ] **[Both]** vercel.com > Add New > Project > import `EfZinWellness/efzin-site`. Set the **Production Branch** to `main`. The `phase1` branch builds **Preview** deployments (this is staging). `phase1` is merged into `main` only on launch day (I1), after the Production environment variables are set. Keep Framework: Next.js.
 - [ ] **[Both]** Environment variables: enter the table from A2 for **Preview**. Production values wait until section I.
+- [ ] **[Both]** Remember: **changing an environment variable only affects new deployments.** After adding or changing any, redeploy (Deployments > the latest > Redeploy) before testing.
 - [ ] **[Both]** **Scheduled jobs.** `vercel.json` already defines three: `/api/cron/daily` (06:00 Dubai: reminders, instalments, unpaid cancellations), `/api/cron/gift-delivery` (08:00 Dubai: scheduled gift cards) and `/api/cron/hourly` (frees spots and gift reservations from abandoned checkouts). Check Project > Settings > Cron Jobs lists all three and that `CRON_SECRET` is set for that environment. Note: Vercel runs cron jobs on the **Production** deployment only, so on staging Claude triggers them by hand (see F2).
 - [ ] **[Tanya]** Set `ADMIN_EMAILS` (A2). Then check: signed in with that email, `/admin` opens; signed out or with another email it shows a "not found" page.
 - [ ] **[Claude]** Open the preview address: every page loads, no error banner, `/api/cron/daily` without the secret answers 401.
-- [ ] **[Claude]** Add the Resend sender domain DNS for staging if you want staging emails to deliver (otherwise they only appear in Resend's log; fine for testing).
+- [ ] **[Claude]** Confirm A3 (Resend domain verified) is done; staging emails do not send without it.
 
 ---
 
@@ -121,16 +134,18 @@ Everything below runs in **Stripe test mode** against the staging preview. Test 
 
 ### F1. Automated booking test
 
-- [ ] **[Claude]** Set (on the computer, not in Vercel): `E2E_STAGING_URL`, `STRIPE_SECRET_KEY` (**sk_test_ only; the test refuses a live key**), `EFZIN_E2E_ADMIN_EMAIL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (staging). Optional: `E2E_STAGING_SLUG`, `E2E_STAGING_SOLDOUT_SLUG` (an experience with no spots left, so the waitlist step runs).
+- [ ] **[Claude]** Set (on the computer, not in Vercel): `E2E_STAGING_URL`, `STRIPE_SECRET_KEY` (**sk_test_ only; the test refuses a live key**), `EFZIN_E2E_ADMIN_EMAIL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (staging), and `E2E_STAGING_SLUG` (an experience that is on sale with spots left on staging; the test stops with a clear message if it is missing or not on sale). The test refuses the real efzinwellness.com address. Optional: `E2E_STAGING_SOLDOUT_SLUG` (an experience with no spots left, so the waitlist step runs). Test guests use Resend's safe test address `delivered@resend.dev` (with `+label` variants), so no real inbox is emailed.
 - [ ] **[Claude]** Run `npm run test:e2e:staging`.
-- **Expected:** four tests pass. (1) A booking with one guest goes through Stripe Checkout with the 4242 card and lands on the "you're booked in" page. (2) A sold-out experience shows "Join the waitlist" and accepts a name and email. (3) The booker signs in to My Ef Zin and sees the **cancel preview** with exact amounts; nothing is cancelled. (4) The admin opens the experience and checks the guest in. Without the settings above, the test shows as "skipped" with the reason.
+- **Expected:** with `E2E_STAGING_SOLDOUT_SLUG` set, four tests pass; without it, **three pass and one (the waitlist) is skipped**. (1) A booking with one guest goes through Stripe Checkout with the 4242 card and lands on the "you're booked in" page. (2) A sold-out experience shows "Join the waitlist" and accepts a name and email. (3) The booker signs in to My Ef Zin and sees the **cancel preview** with exact amounts; nothing is cancelled. (4) The admin opens the experience and checks the guest in. Without the settings above, the test shows as "skipped" with the reason.
 - [ ] Afterwards Claude checks the booker and admin emails arrived in Resend's log, and `/admin` shows the booking.
 
 ### F2. Payment plan with a Stripe test clock
 
 A "test clock" lets Stripe pretend time has passed, so we can test a monthly plan in an afternoon.
 
-- [ ] **[Claude]** Run `npx tsx scripts/stripe-test-clock.ts setup --card fail`. It prints a clock id and exact next steps. Set `STRIPE_TEST_CLOCK_ID` in Vercel Preview to that id and redeploy.
+**One clock per booking scenario.** A clock can hold only a small number of customers (3 at time of writing) and the site creates a fresh Stripe customer for each new email, so each scenario below (A, B, C) gets its own clock: run `setup`, set the id in Vercel, redeploy, make that one booking, finish it, delete the clock, then start the next. Always unset `STRIPE_TEST_CLOCK_ID` and redeploy after deleting a clock, otherwise new bookings fail.
+
+- [ ] **[Claude]** Scenario A. Run `npx tsx scripts/stripe-test-clock.ts setup --card fail`. It creates a clock (no customer) and prints the clock id and exact next steps. Set `STRIPE_TEST_CLOCK_ID` in Vercel Preview to that id and redeploy.
 - [ ] **[Both]** Book the monthly-plan retreat on staging with a **new email address**, choosing "Deposit + monthly payments", paying the deposit at Checkout with `4000 0000 0000 0341`.
   - **Expected:** the deposit goes through, the booking is confirmed, the confirmation email lists each future date and amount, the plan table appears under the booking in My Ef Zin.
 - [ ] **[Both]** For each due date in turn (the script prints the exact commands): advance the clock (`advance --clock ... --to <date>`), pull that item's due date to today in the database, and run the daily job by hand (`curl -H "Authorization: Bearer <CRON_SECRET>" <staging>/api/cron/daily`).
@@ -139,12 +154,13 @@ A "test clock" lets Stripe pretend time has passed, so we can test a monthly pla
   - **Expected:** the failed instalment is collected on the new card straight away; a receipt email arrives; the item shows paid.
 - [ ] **[Both]** Advance through the remaining dates the same way.
   - **Expected:** each instalment is charged on its day, each gets an "upcoming payment" email beforehand and a receipt after.
-- [ ] **[Both]** Make a second plan booking, let one instalment fail, then choose **Pay the rest now**.
+- [ ] **[Claude]** Delete clock A, unset `STRIPE_TEST_CLOCK_ID`, then repeat `setup`, set the new id and redeploy for each of the next scenarios.
+- [ ] **[Both]** Scenario B (new clock, new email). Make a plan booking, let one instalment fail, then choose **Pay the rest now**.
   - **Expected:** one Stripe payment for everything still owed, booking marked fully paid, one receipt.
-- [ ] **[Both]** Make a third booking and let an instalment stay unpaid past its due date plus 2 days.
+- [ ] **[Both]** Scenario C (new clock, new email). Make a third booking and let an instalment stay unpaid past its due date plus 2 days.
   - **Expected:** the booking is cancelled, the guest gets a "cancelled for non-payment" email, and any money-back owed under the policy is refunded automatically; Tanya is alerted.
 - [ ] **[Both]** A guest with **no saved card** (rare): expect Stripe to email an invoice with a pay link, and an alert to Tanya if it goes overdue.
-- [ ] **[Claude]** Delete the test clock in Stripe afterwards and remove `STRIPE_TEST_CLOCK_ID`.
+- [ ] **[Claude]** Delete the last test clock in Stripe, then **unset `STRIPE_TEST_CLOCK_ID`** in Vercel and redeploy.
 
 ### F3. Gift cards
 
@@ -210,11 +226,11 @@ Do these in order. Aim for a quiet day with a couple of hours free.
 
 ### I1. Production setup
 
-- [ ] **[Both]** Repeat B (Supabase: auth settings, template, Google) for `efzin-prod`. Confirm Pro and backups.
+- [ ] **[Both]** Repeat B (Supabase: auth settings, template, Google, **Resend SMTP**) for `efzin-prod`. The Resend domain from A3 is already verified. Confirm Pro and backups.
 - [ ] **[Claude]** Repeat C for `efzin-prod` (migrations, `sync:content`, idle timeout check). No types regeneration needed beyond a re-check.
 - [ ] **[Both]** Stripe **live mode**: add the webhook endpoint with the six events (D), put the live signing secret in Vercel Production, turn Adaptive Pricing, invoice emails and Smart Retries on in live mode.
-- [ ] **[Tanya]** Put all Production environment variables in Vercel (A2): live `STRIPE_SECRET_KEY`, live `STRIPE_WEBHOOK_SECRET`, prod Supabase, `NEXT_PUBLIC_SITE_ORIGIN=https://www.efzinwellness.com`, `ADMIN_EMAILS`, a **new** `CRON_SECRET`. No `STRIPE_TEST_CLOCK_ID`.
-- [ ] **[Both]** Merge `phase1` into `main` so Production deploys. Check the build is green and `/api/cron/daily` without the secret answers 401.
+- [ ] **[Tanya]** Put all Production environment variables in Vercel (A2): live `STRIPE_SECRET_KEY`, live `STRIPE_WEBHOOK_SECRET`, prod Supabase, `NEXT_PUBLIC_SITE_ORIGIN=https://www.efzinwellness.com`, `ADMIN_EMAILS`, a **new** `CRON_SECRET`. No `STRIPE_TEST_CLOCK_ID`. Only after these are all set:
+- [ ] **[Both]** Merge `phase1` into `main` (launch day only) so Production deploys. Check the build is green and `/api/cron/daily` without the secret answers 401.
 - [ ] **[Claude]** Run the Squarespace import against production (G).
 
 ### I2. Domain and email DNS
@@ -223,7 +239,7 @@ Your domain is probably registered through **Google Domains, which Google moved 
 
 - [ ] **[Tanya]** Note down **every existing DNS record**, especially **MX** (receives your email), **TXT/SPF** and **DKIM** (proves your email is really yours). Screenshot the DNS page. **These must stay exactly as they are** or your inbox and outgoing mail will break.
 - [ ] **[Both]** In Vercel > Project > Settings > Domains add `www.efzinwellness.com` and `efzinwellness.com` (redirects to www). Vercel shows what to add. Typically a `CNAME` for `www` and an `A` record for the bare domain. In your domain's DNS, **replace only** the records that point the website at Squarespace (the `www` CNAME and the `A` records for `@`); leave MX, SPF and DKIM alone.
-- [ ] **[Both]** Resend > Domains > add `efzinwellness.com`; Resend shows a few DNS records (SPF/DKIM). **Add them alongside** the existing ones; if an SPF record already exists, **merge** (a domain may only have one SPF line: add `include:amazonses.com`-style entries to the existing one as Resend instructs, don't create a second). Wait until Resend shows "Verified". Emails come from `Ef Zin <hello@efzinwellness.com>`.
+- [ ] **[Both]** Resend: already verified in A3. Re-check Resend > Domains still shows "Verified" after the website DNS change, and that your existing MX, SPF and DKIM records are untouched.
 - [ ] **[Claude]** Check after DNS settles (minutes to hours): the site loads on `https://www.efzinwellness.com` with a padlock; sending a test email from the site arrives and isn't in spam; your normal inbox still works (send yourself an email from another account).
 - [ ] **[Claude]** **Check old links still work.** Each of these must answer a permanent redirect (301) to the new page:
 

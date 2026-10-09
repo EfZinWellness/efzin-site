@@ -11,12 +11,12 @@ import { stagingSkipReason } from "./staging";
  * SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (the STAGING project) are set. It never uses the local
  * dev server and refuses a live Stripe key. Run with `npm run test:e2e:staging` (see docs/launch-runbook.md).
  *
- * Optional: E2E_STAGING_SLUG (experience to book; default 2026-10-25-flow-and-create) and
- * E2E_STAGING_SOLDOUT_SLUG (an experience with no spots left, for the waitlist test).
+ * Also required: E2E_STAGING_SLUG (an experience that is on sale with spots left on staging).
+ * Optional: E2E_STAGING_SOLDOUT_SLUG (an experience with no spots left, for the waitlist test).
  */
 const skipReason = stagingSkipReason(process.env);
 const BASE = process.env.E2E_STAGING_URL?.trim().replace(/\/$/, "") ?? "";
-const SLUG = process.env.E2E_STAGING_SLUG?.trim() || "2026-10-25-flow-and-create";
+const SLUG = process.env.E2E_STAGING_SLUG?.trim() ?? "";
 const SOLD_OUT_SLUG = process.env.E2E_STAGING_SOLDOUT_SLUG?.trim();
 
 test.use({ baseURL: BASE || undefined, viewport: { width: 390, height: 844 } });
@@ -25,8 +25,10 @@ test.skip(skipReason !== null, skipReason ?? "");
 test.setTimeout(180_000);
 
 const run = Date.now().toString(36);
-const booker = { name: `E2E Booker ${run}`, email: `e2e-booker+${run}@example.com`, phone: "+971500000000" };
-const guest = { name: `E2E Guest ${run}`, email: `e2e-guest+${run}@example.com` };
+// Resend's test address accepts "+label" variants, so no real inbox is ever emailed.
+const resendTest = (label: string) => `delivered+${label}-${run}@resend.dev`;
+const booker = { name: `E2E Booker ${run}`, email: resendTest("booker"), phone: "+971500000000" };
+const guest = { name: `E2E Guest ${run}`, email: resendTest("guest") };
 
 /** Signs a page in as `email` with a one-time link made by the Supabase admin API (staging project). */
 async function signInAs(page: Page, email: string): Promise<void> {
@@ -51,6 +53,9 @@ async function newPage(browser: Browser): Promise<Page> {
 test("books with a guest through Stripe Checkout (test card 4242)", async ({ page }) => {
   await page.goto(`/book/${SLUG}`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  if (await page.getByText(/Not currently available|Sold out/).first().isVisible().catch(() => false)) {
+    throw new Error(`E2E_STAGING_SLUG "${SLUG}" is not on sale on staging (shows Not currently available / Sold out). Pick an experience that is on sale with spots left.`);
+  }
 
   await page.getByRole("button", { name: /^Add one / }).first().click();
   await page.getByLabel("Your name").fill(booker.name);
@@ -86,7 +91,7 @@ test("a sold-out experience offers the waitlist", async ({ page }) => {
   await page.waitForURL(new RegExp(`/waitlist/${SOLD_OUT_SLUG}`));
   const form = page.getByTestId("waitlist-form");
   await form.getByLabel("Name").fill(`E2E Waiter ${run}`);
-  await form.getByLabel("Email").fill(`e2e-waiter+${run}@example.com`);
+  await form.getByLabel("Email").fill(resendTest("waiter"));
   await form.getByRole("button", { name: "Join the waitlist" }).click();
   await expect(page.getByRole("status")).toContainText(/we.ll email you/i);
 });

@@ -1,5 +1,6 @@
 import type { SqlClient } from "../content/sync";
 import type { StripeApi } from "./client";
+import { isStripeTestKey } from "./testKey";
 
 /** Returns the person's Stripe customer, creating and storing it (people.stripe_customer_id) on first use. */
 export async function ensureStripeCustomer(db: SqlClient, stripe: StripeApi, personId: string): Promise<string> {
@@ -18,8 +19,8 @@ export async function ensureStripeCustomer(db: SqlClient, stripe: StripeApi, per
       ...(person.phone ? { phone: person.phone } : {}),
       metadata: { person_id: personId },
       // Staging only: attach new customers to a Stripe test clock (scripts/stripe-test-clock.ts).
-      ...(process.env.STRIPE_TEST_CLOCK_ID && process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_")
-        ? { test_clock: process.env.STRIPE_TEST_CLOCK_ID }
+      ...(process.env.STRIPE_TEST_CLOCK_ID?.trim() && isStripeTestKey(process.env.STRIPE_SECRET_KEY)
+        ? { test_clock: process.env.STRIPE_TEST_CLOCK_ID.trim() }
         : {}),
     },
     // A retried request for the same person reuses the same customer.
