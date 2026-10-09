@@ -5,6 +5,7 @@ import { withDbClient } from "@/lib/db/client";
 import { sendEmail } from "@/lib/email/send";
 import { getUsdRates } from "@/lib/pricing/rates";
 import { guardPost } from "@/lib/requests/guard";
+import { requestOrigin } from "@/lib/requests/origin";
 import { clientIp, createLimiter } from "@/lib/requests/throttle";
 import { getStripe } from "@/lib/stripe/client";
 
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
     withDb: withDbClient,
     stripe: getStripe(),
     usdRates: getUsdRates,
-    origin: process.env.NEXT_PUBLIC_SITE_ORIGIN || new URL(req.url).origin,
+    origin: await requestOrigin(),
     now: new Date(),
     sendEmail,
     auth: getAuthAdmin(),

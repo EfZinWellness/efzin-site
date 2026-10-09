@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import Stripe from "stripe";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { processWebhook } from "../../lib/stripe/webhook";
 
 const stripe = new Stripe("sk_test_not_used");
@@ -23,6 +25,17 @@ function deps(handle: (evt: Stripe.Event) => Promise<unknown>) {
     },
   };
 }
+
+describe("origin for links in the money routes", () => {
+  it("/api/checkout, /api/gift/checkout and the webhook use requestOrigin, never the request's own URL", () => {
+    for (const f of ["app/api/checkout/route.ts", "app/api/gift/checkout/route.ts", "app/api/stripe/webhook/route.ts"]) {
+      const src = readFileSync(join(process.cwd(), f), "utf8");
+      expect(src, f).not.toMatch(/req(uest)?\.url\)\.origin/);
+      expect(src, f).toMatch(/await requestOrigin\(\)/);
+      expect(src, f).not.toContain("NEXT_PUBLIC_SITE_ORIGIN");
+    }
+  });
+});
 
 describe("processWebhook", () => {
   it("rejects a bad signature with 400 and does not handle the event", async () => {

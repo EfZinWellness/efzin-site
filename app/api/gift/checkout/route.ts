@@ -2,6 +2,7 @@ import { withDbClient } from "@/lib/db/client";
 import { sendEmail } from "@/lib/email/send";
 import { handleGiftCheckout } from "@/lib/giftcards/purchase";
 import { guardPost } from "@/lib/requests/guard";
+import { requestOrigin } from "@/lib/requests/origin";
 import { createLimiter } from "@/lib/requests/throttle";
 import { getStripe } from "@/lib/stripe/client";
 
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
   const res = await handleGiftCheckout(body, {
     withDb: withDbClient,
     stripe: getStripe(),
-    origin: process.env.NEXT_PUBLIC_SITE_ORIGIN || new URL(req.url).origin,
+    origin: await requestOrigin(),
     now: new Date(),
     sendEmail,
   });
