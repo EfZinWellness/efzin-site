@@ -1,0 +1,6 @@
+"Order ID","Email","Created at","Lineitem name","Lineitem quantity","Lineitem price","Currency","Billing Name"
+"1001","layla@example.com","2026-09-12 14:03:11 +0400","Strong Body Calm Mind","1","250.00","AED","Layla Hassan"
+"1002","layla@example.com","2026-09-20 09:15:00 +0400","Strong Body Calm Mind - Contrast Only","2","150.00","AED","Layla Hassan"
+"1003","omar@example.com","2026-09-22 18:40:00 +0400","Strong Body Calm Mind","1","250.00","AED","Al Mansoori, Jr., Omar"
+"1004","sara@example.com","2026-09-25 11:00:00 +0400","Mystery Workshop","1","100.00","AED","Sara Khan"
+"1004","sara@example.com","2026-09-25 11:00:00 +0400","Strong Body Calm Mind","1","65.00","USD","Sara Khan"

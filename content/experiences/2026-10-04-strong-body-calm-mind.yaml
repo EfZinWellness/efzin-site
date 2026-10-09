@@ -12,11 +12,11 @@ pillars: [move, thrive]
 status: on_sale # effective status becomes past automatically after endsAt
 baseCurrency: AED
 policy: standard_event
-heroImage: https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/1f742461-132b-4bd7-806f-6535531f1b68/Copy+of+Re+-078.jpg?format=1500w
+heroImage: /images/event-re-recovery-hero.jpg
 gallery:
-  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/ed9ad354-7d0c-4d23-b41c-c11b4c105ff4/Copy+of+Re+Wellness-080.jpg?format=1000w
-  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/a120293f-bf6d-4984-9735-70e41bf1517f/Copy+of+Re+-036.jpg?format=1000w
-  - https://images.squarespace-cdn.com/content/v1/677bb90cc220295a8af20de1/46ee1c64-4569-435f-a83d-eaf923822d0c/Copy+of+Re+-051.jpg?format=1000w
+  - /images/event-re-wellness-1.jpg
+  - /images/event-re-wellness-2.jpg
+  - /images/event-re-wellness-3.jpg
 summary: A vinyasa flow followed by a contrast therapy experience at Rē.
 story: |
   Start with a strong, mindful vinyasa flow, then recover with Rē's signature

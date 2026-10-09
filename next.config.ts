@@ -9,9 +9,6 @@ const nextConfig: NextConfig = {
     "/api/stripe/webhook": ["./public/brand/**"],
     "/api/cron/gift-delivery": ["./public/brand/**"],
   },
-  images: {
-    remotePatterns: [{ protocol: "https", hostname: "images.squarespace-cdn.com" }],
-  },
   turbopack: {
     rules: {
       "*.css": {
