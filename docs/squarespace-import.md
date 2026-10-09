@@ -39,8 +39,23 @@ Orders CSV (one row per line item; rows of one order repeat the `Order ID`)
 `scripts/squarespace-map.json` maps a Squarespace product name to an experience slug, or to
 `{ "slug": "...", "ticket": "<ticket key>" }` to pick a ticket type (default: the most expensive
 ticket). The experience must already be in the database (`npm run sync:content`).
-Unmapped products are listed, never guessed; their lines are not imported. Add them to the map and
-rerun.
+Unmapped products are listed, never guessed; their lines are not imported.
+
+Workflow for past events and retreats (their YAML is created at import time, not in advance):
+
+1. Run with `--dry-run`. The output lists every unmapped product name with its line count and the
+   first and last order dates (also `unmappedDetail` in the result).
+2. For each product, create a `status: past` experience YAML in `content/experiences/` (title, dates,
+   tickets, photos) and run `npm run sync:content`.
+3. Add the product to `scripts/squarespace-map.json`, then rerun the dry run until `unmapped` and
+   `missingExperiences` are empty.
+4. Run for real. Already-imported lines are skipped, so reruns are safe.
+
+Order-level columns (Email, Billing Name, Created at/Paid at, Currency, Financial/Payment Status)
+that are blank on extra line-item rows are taken from the first row of the same Order ID. If the
+export has a `Financial Status` (or `Payment Status`) column, orders that are refunded, cancelled,
+voided or pending are skipped and listed. Lines whose date is missing, unreadable or has no
+timezone are counted ("timezone-less" dates are read as UTC).
 
 ## 4. Run
 

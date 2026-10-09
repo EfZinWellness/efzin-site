@@ -25,7 +25,7 @@ describe("importSquarespace", () => {
     const db = await setup();
     const r = await run(db);
     expect(r.people).toBe(3);
-    expect(r.bookings).toBe(4);
+    expect(r.bookings).toBe(7);
     expect(r.unmapped).toEqual(["Mystery Workshop"]);
     expect(r.skippedNoEmail).toBe(1);
     expect(r.needsAedConversion).toEqual(["sqsp:1004:1"]);
@@ -79,6 +79,32 @@ describe("importSquarespace", () => {
     expect(usd.rows[0]).toEqual({ amount_paid_minor: 6500, amount_aed_minor: 0, presentment_currency: "USD" });
   });
 
+  it("carries order-level columns onto continuation rows, keeping refs stable", async () => {
+    const db = await setup();
+    const r = await run(db);
+    const rows = await db.query<{ external_ref: string; email: string; amount_aed_minor: number; day: string }>(
+      `select b.external_ref, p.email, b.amount_aed_minor, to_char(b.created_at at time zone 'UTC', 'YYYY-MM-DD') as day
+         from bookings b join people p on p.id = b.booker_person_id
+        where b.external_ref like 'sqsp:1005:%' order by 1`,
+    );
+    expect(rows.rows).toEqual([
+      { external_ref: "sqsp:1005:0", email: "omar@example.com", amount_aed_minor: 25000, day: "2026-09-28" },
+      { external_ref: "sqsp:1005:1", email: "omar@example.com", amount_aed_minor: 15000, day: "2026-09-28" },
+    ]);
+    expect(r.unmappedDetail).toEqual([
+      { name: "Mystery Workshop", count: 2, firstOrderDate: "2026-09-25", lastOrderDate: "2026-09-28" },
+    ]);
+  });
+
+  it("skips refunded orders and reports them; reports dates without a timezone", async () => {
+    const db = await setup();
+    const r = await run(db);
+    expect(r.skippedStatus).toEqual(["1006"]);
+    const n = await db.query("select 1 from bookings where external_ref like 'sqsp:1006:%'");
+    expect(n.rows).toHaveLength(0);
+    expect(r.unparseableDates).toBe(1);
+  });
+
   it("rerun is a no-op", async () => {
     const db = await setup();
     await run(db);
@@ -89,14 +115,14 @@ describe("importSquarespace", () => {
     const c = await db.query<{ p: number; b: number; g: number }>(
       "select (select count(*) from people)::int p, (select count(*) from bookings)::int b, (select count(*) from booking_guests)::int g",
     );
-    expect(c.rows[0]).toEqual({ p: 3, b: 4, g: 4 });
+    expect(c.rows[0]).toEqual({ p: 3, b: 7, g: 7 });
   });
 
   it("dry run reports counts but writes nothing", async () => {
     const db = await setup();
     const r = await run(db, { dryRun: true });
     expect(r.people).toBe(3);
-    expect(r.bookings).toBe(4);
+    expect(r.bookings).toBe(7);
     const c = await db.query<{ p: number; b: number }>(
       "select (select count(*) from people)::int p, (select count(*) from bookings)::int b",
     );

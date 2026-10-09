@@ -39,7 +39,14 @@ async function main(): Promise<number> {
     const r = await importSquarespace(db, readFileSync(customers, "utf8"), readFileSync(orders, "utf8"), map, { dryRun });
     console.log(`${dryRun ? "[dry run, nothing written] " : ""}new people: ${r.people}, new bookings: ${r.bookings}`);
     console.log(`rows without email: ${r.skippedNoEmail}, invalid order rows: ${r.skippedInvalid}`);
-    if (r.unmapped.length) console.log(`UNMAPPED products (add to ${mapFile}):\n  ${r.unmapped.join("\n  ")}`);
+    if (r.unmappedDetail.length) {
+      console.log(`UNMAPPED products (add to ${mapFile}; create the past-experience YAML first if needed):`);
+      for (const u of r.unmappedDetail) {
+        console.log(`  ${u.name} | lines: ${u.count} | first order: ${u.firstOrderDate ?? "?"} | last order: ${u.lastOrderDate ?? "?"}`);
+      }
+    }
+    if (r.skippedStatus.length) console.log(`orders skipped (refunded/cancelled/voided/pending): ${r.skippedStatus.join(", ")}`);
+    if (r.unparseableDates) console.log(`lines with a missing, unreadable or timezone-less date: ${r.unparseableDates}`);
     if (r.missingExperiences.length) {
       console.log(`Mapped experiences not in the database (run npm run sync:content):\n  ${r.missingExperiences.join("\n  ")}`);
     }

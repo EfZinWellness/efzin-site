@@ -27,7 +27,27 @@ export interface ImportResult {
   skippedInvalid: number;
   /** external_refs of bookings in a currency other than AED, stored with amount_aed_minor = 0. */
   needsAedConversion: string[];
+  /** The unmapped products with how many lines used them and the first and last order dates (YYYY-MM-DD). */
+  unmappedDetail: UnmappedProduct[];
+  /** Order ids skipped because their Financial/Payment Status is refunded, cancelled, voided or pending. */
+  skippedStatus: string[];
+  /** Imported lines whose date was missing, unreadable or had no timezone (booking date falls back to the parsed value or now). */
+  unparseableDates: number;
 }
+
+export interface UnmappedProduct {
+  name: string;
+  count: number;
+  firstOrderDate: string | null;
+  lastOrderDate: string | null;
+}
+
+const ORDER_LEVEL = [
+  "email", "customer email", "billing name", "name", "created at", "paid at", "order date",
+  "currency", "financial status", "payment status",
+];
+const SKIP_STATUS = new Set(["refunded", "cancelled", "canceled", "voided", "pending"]);
+const HAS_TZ = /(Z|[+-]\d{2}:?\d{2})$/i;
 
 interface ExperienceInfo {
   id: string;
@@ -68,6 +88,9 @@ export async function importSquarespace(
     skippedNoEmail: 0,
     skippedInvalid: 0,
     needsAedConversion: [],
+    unmappedDetail: [],
+    skippedStatus: [],
+    unparseableDates: 0,
   };
 
   const products = new Map<string, { slug: string; ticket?: string }>();
@@ -116,8 +139,9 @@ export async function importSquarespace(
     return id;
   }
 
-  const unmapped = new Set<string>();
+  const unmapped = new Map<string, UnmappedProduct>();
   const missing = new Set<string>();
+  const statusSkipped = new Set<string>();
 
   await db.query("begin");
   try {
@@ -133,25 +157,54 @@ export async function importSquarespace(
     }
 
     const lineCounter = new Map<string, number>();
+    // Extra line-item rows of an order often leave the order-level columns blank: carry them forward.
+    const carried = new Map<string, Record<string, string>>();
     for (const rec of parseCsvRecords(ordersCsv)) {
       const orderId = pick(rec, "order id", "order number", "order");
+      if (!orderId) {
+        result.skippedInvalid++;
+        continue;
+      }
+      // The line index is the row's position within its order and advances for every row,
+      // skipped or not, so refs stay stable.
+      const lineIndex = lineCounter.get(orderId) ?? 0;
+      lineCounter.set(orderId, lineIndex + 1);
+
+      const prev = carried.get(orderId) ?? {};
+      for (const k of ORDER_LEVEL) {
+        if (rec[k]) prev[k] ??= rec[k];
+        else if (prev[k]) rec[k] = prev[k];
+      }
+      carried.set(orderId, prev);
+
       const email = pick(rec, "email", "customer email");
       const product = pick(rec, "lineitem name", "product name", "item");
       if (!email) {
         result.skippedNoEmail++;
         continue;
       }
-      if (!orderId || !product) {
+      const status = pick(rec, "financial status", "payment status").toLowerCase();
+      if (SKIP_STATUS.has(status)) {
+        statusSkipped.add(orderId);
+        continue;
+      }
+      if (!product) {
         result.skippedInvalid++;
         continue;
       }
-      // The line index is the row's position within its order, counted before any filtering, so refs stay stable.
-      const lineIndex = lineCounter.get(orderId) ?? 0;
-      lineCounter.set(orderId, lineIndex + 1);
+      const dateText = pick(rec, "created at", "paid at", "order date");
 
       const target = products.get(product.trim().toLowerCase());
       if (!target) {
-        unmapped.add(product);
+        const d = parseDate(dateText);
+        const s = unmapped.get(product) ?? { name: product, count: 0, firstOrderDate: null, lastOrderDate: null };
+        s.count++;
+        if (d) {
+          const day = d.toISOString().slice(0, 10);
+          if (!s.firstOrderDate || day < s.firstOrderDate) s.firstOrderDate = day;
+          if (!s.lastOrderDate || day > s.lastOrderDate) s.lastOrderDate = day;
+        }
+        unmapped.set(product, s);
         continue;
       }
       const exp = await experience(target.slug);
@@ -172,7 +225,8 @@ export async function importSquarespace(
       const aed = currency === "AED" ? total : 0;
       const base = currency === exp.baseCurrency ? total : null;
       const ref = `sqsp:${orderId}:${lineIndex}`;
-      const when = parseDate(pick(rec, "created at", "paid at", "order date"));
+      const when = parseDate(dateText);
+      if (!when || !HAS_TZ.test(dateText.trim())) result.unparseableDates++;
 
       const personId = await person(email, pick(rec, "billing name", "name"), "", false);
       const b = await db.query<{ id: string }>(
@@ -199,7 +253,9 @@ export async function importSquarespace(
     throw err;
   }
 
-  result.unmapped = [...unmapped];
+  result.unmapped = [...unmapped.keys()];
+  result.unmappedDetail = [...unmapped.values()];
+  result.skippedStatus = [...statusSkipped];
   result.missingExperiences = [...missing];
   return result;
 }
