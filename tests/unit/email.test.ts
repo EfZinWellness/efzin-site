@@ -149,6 +149,36 @@ const CASES: [EmailKind, Record<string, unknown>, { subject: string; text: strin
     { forAdmin: true, experience: "Retreat", booker: "Layla <l@x.com>", unpaidMinor: 192000, currency: "EUR", bookingId: "b1" },
     { subject: "Booking cancelled (balance unpaid): Retreat", text: ["Layla <l@x.com>", "b1"] },
   ],
+  [
+    "booking_cancelled",
+    {
+      name: "Layla",
+      experience: "Retreat",
+      cardRefunds: [
+        { amountMinor: 46500, currency: "EUR" },
+        { amountMinor: 17400, currency: "EUR" },
+      ],
+      feesDeductedMinor: 2100,
+      giftCardAed: 120000,
+      creditAed: 0,
+    },
+    { subject: "Your booking for Retreat is cancelled", text: ["€465 + €174", "AED 1,200", "No further payments", "processing fees"] },
+  ],
+  [
+    "booking_cancelled",
+    { name: "Layla", experience: "Sound Bath", creditAed: 28000, creditCode: "EFZ-ABCDEF", creditExpiresOn: "2028-01-29" },
+    { subject: "Your booking for Sound Bath is cancelled", text: ["AED 280", "EFZ-ABCDEF", "29 Jan 2028"] },
+  ],
+  [
+    "booking_cancelled",
+    { name: "Layla", experience: "Sound Bath", byEfzin: true, cardRefunds: [{ amountMinor: 28000, currency: "AED" }] },
+    { subject: "Sound Bath has been cancelled", text: ["full refund", "no fees deducted", "AED 280", "future experience"] },
+  ],
+  [
+    "booking_transferred",
+    { name: "Sara", experience: "Sound Bath", newGuestName: "Nour N", startsAt: "2027-02-01T06:00:00.000Z" },
+    { subject: "Your place at Sound Bath has been transferred", text: ["to Nour N", "1 February 2027"] },
+  ],
 ];
 
 describe("email templates", () => {
@@ -166,7 +196,7 @@ describe("email templates", () => {
 
   it("covers every kind with a template, even with no data", async () => {
     const kinds = new Set(CASES.map((c) => c[0]));
-    expect(kinds.size).toBe(22);
+    expect(kinds.size).toBe(24);
     for (const k of kinds) {
       const r = await renderEmail(k, {});
       expect(r.subject.length).toBeGreaterThan(0);

@@ -90,9 +90,10 @@ async function settle(s: Stripe.Checkout.Session, db: SqlClient): Promise<Settle
   };
   await db.query(
     `insert into pay_rest_settlements
-       (session_id, booking_id, settled_item_ids, settled_minor, paid_minor, excess_minor, currency, invoice_ids, booking_status)
-     values ($1, $2, $3::uuid[], $4, $5, $6, $7, $8::text[], $9)`,
-    [s.id, bookingId, settled.map((i) => i.id), settledMinor, paid, excess, currency, row.invoice_ids, status],
+       (session_id, booking_id, settled_item_ids, settled_minor, paid_minor, excess_minor, currency, invoice_ids, booking_status,
+        payment_intent)
+     values ($1, $2, $3::uuid[], $4, $5, $6, $7, $8::text[], $9, $10)`,
+    [s.id, bookingId, settled.map((i) => i.id), settledMinor, paid, excess, currency, row.invoice_ids, status, refId(s.payment_intent)],
   );
   return row;
 }

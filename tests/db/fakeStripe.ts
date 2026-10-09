@@ -3,6 +3,19 @@ import type { StripeApi } from "../../lib/stripe/client";
 
 type InvoiceStatus = Stripe.Invoice.Status;
 
+export interface FakeCharge {
+  id: string;
+  object: "charge";
+  payment_intent: string;
+  amount: number;
+  amount_refunded: number;
+  currency: string;
+  created: number;
+  status: "succeeded";
+  refunded: boolean;
+  balance_transaction: { id: string; fee: number; currency: string; exchange_rate: number | null };
+}
+
 /** Records every call; never talks to Stripe. */
 export class FakeStripe implements StripeApi {
   sessions: Stripe.Checkout.SessionCreateParams[] = [];
@@ -69,6 +82,73 @@ export class FakeStripe implements StripeApi {
         return { id };
       },
       retrieve: async (id: string) => ({ id, status: this.sessionStatus[id] ?? ("open" as const) }),
+      /** Sessions created through this fake, filtered like Stripe (customer, status). */
+      list: async (params: Stripe.Checkout.SessionListParams) => {
+        const all = this.sessions
+          .map((p, i) => ({ id: `cs_test_${i + 1}`, metadata: (p.metadata ?? null) as Stripe.Metadata | null, customer: p.customer }))
+          .filter((s) => !params.customer || s.customer === params.customer)
+          .filter((s) => !params.status || (this.sessionStatus[s.id] ?? "open") === params.status);
+        const start = params.starting_after ? all.findIndex((s) => s.id === params.starting_after) + 1 : 0;
+        const size = Math.min(params.limit ?? 10, this.pageSize);
+        const page = all.slice(start, start + size);
+        return { data: page.map(({ id, metadata }) => ({ id, metadata })), has_more: start + size < all.length };
+      },
+    },
+  };
+
+  /** Charges by id (add with addCharge); refunds.create adds to amount_refunded like Stripe. */
+  chargeStore: Record<string, FakeCharge> = {};
+  /** invoice id → the payment intent that paid it (invoicePayments.list). */
+  invoicePaymentIntent: Record<string, string> = {};
+
+  /** A succeeded charge with its balance transaction (fee in `feeCurrency`, default AED). */
+  addCharge(c: {
+    id: string;
+    paymentIntent: string;
+    amount: number;
+    currency: string;
+    fee: number;
+    feeCurrency?: string;
+    exchangeRate?: number | null;
+    created: number;
+    amountRefunded?: number;
+  }): void {
+    this.chargeStore[c.id] = {
+      id: c.id,
+      object: "charge",
+      payment_intent: c.paymentIntent,
+      amount: c.amount,
+      amount_refunded: c.amountRefunded ?? 0,
+      currency: c.currency.toLowerCase(),
+      created: c.created,
+      status: "succeeded",
+      refunded: false,
+      balance_transaction: {
+        id: `txn_${c.id}`,
+        fee: c.fee,
+        currency: (c.feeCurrency ?? "aed").toLowerCase(),
+        exchange_rate: c.exchangeRate ?? null,
+      },
+    };
+  }
+
+  chargeListCalls: Stripe.ChargeListParams[] = [];
+
+  charges = {
+    list: async (params: Stripe.ChargeListParams) => {
+      this.chargeListCalls.push(params);
+      const data = Object.values(this.chargeStore).filter((c) => c.payment_intent === params.payment_intent);
+      return { data, has_more: false };
+    },
+  };
+
+  invoicePayments = {
+    list: async (params: Stripe.InvoicePaymentListParams) => {
+      const pi = params.invoice ? this.invoicePaymentIntent[params.invoice] : undefined;
+      return {
+        data: pi ? [{ id: `inpay_${params.invoice}`, status: "paid", payment: { type: "payment_intent" as const, payment_intent: pi } }] : [],
+        has_more: false,
+      };
     },
   };
 
@@ -166,6 +246,9 @@ export class FakeStripe implements StripeApi {
   /** Set to make the next refunds.create throw (once). */
   refundError: unknown = null;
 
+  /** Idempotency keys seen by refunds.create (like Stripe: same params → same refund, else an error). */
+  refundIdempotency = new Map<string, { params: string; result: { id: string } }>();
+
   refunds = {
     create: async (params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions) => {
       if (this.refundError) {
@@ -173,8 +256,23 @@ export class FakeStripe implements StripeApi {
         this.refundError = null;
         throw e;
       }
+      const key = options?.idempotencyKey;
+      const seen = key ? this.refundIdempotency.get(key) : undefined;
+      if (seen) {
+        if (seen.params !== JSON.stringify(params)) {
+          throw Object.assign(new Error("Keys for idempotent requests can only be used with the same parameters"), {
+            type: "StripeIdempotencyError",
+            statusCode: 400,
+          });
+        }
+        return seen.result;
+      }
       this.refundsCreated.push(options ? { params, options } : { params });
-      return { id: `re_test_${this.refundsCreated.length}` };
+      const charge = params.charge ? this.chargeStore[params.charge] : undefined;
+      if (charge) charge.amount_refunded += params.amount ?? charge.amount - charge.amount_refunded;
+      const result = { id: `re_test_${this.refundsCreated.length}` };
+      if (key) this.refundIdempotency.set(key, { params: JSON.stringify(params), result });
+      return result;
     },
   };
 

@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 import { payRestAction, updateCardAction } from "@/app/account/actions";
 import AccountNav from "@/components/account/AccountNav";
 import ActionButton from "@/components/account/ActionButton";
+import CancelPanel from "@/components/account/CancelPanel";
+import ConfirmForm from "@/components/account/ConfirmForm";
+import { transferAllowed } from "@/lib/booking/transfer";
+import { transferAction } from "./actions";
 import { loadBooking, unpaidMinor } from "@/lib/account/bookings";
 import { formatStart, ITEM_LABELS, STATUS_LABELS } from "@/lib/account/format";
 import { requirePerson } from "@/lib/auth/session";
@@ -26,6 +30,11 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
   const failed = b.schedule.some((i) => i.status === "failed");
   const canPay = b.isBooker && b.status === "deposit_paid" && owed > 0;
   const currency = b.baseCurrency ?? b.schedule[0]?.currency ?? "AED";
+  const now = new Date();
+  // Cancel and transfer: the booker of an active booking that hasn't started.
+  const selfService =
+    b.isBooker && (b.status === "paid" || b.status === "deposit_paid") && b.startAt !== null && new Date(b.startAt) > now;
+  const canTransfer = transferAllowed(b.type, null, b.startAt, now);
 
   return (
     <div className="mx-auto max-w-md px-4 pb-20 pt-10">
@@ -40,6 +49,9 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
 
       {q.paid === "1" ? (
         <p role="status" className="mt-6 border border-sand p-3 text-sm">Thank you. Your payment is being confirmed and will show here shortly.</p>
+      ) : null}
+      {q.cancelled === "1" ? (
+        <p role="status" className="mt-6 border border-sand p-3 text-sm">Your booking has been cancelled. We&rsquo;ve emailed you the details.</p>
       ) : null}
       {q.card === "updated" ? (
         <p role="status" className="mt-6 border border-sand p-3 text-sm">Thank you. Your new card will be used for the remaining payments.</p>
@@ -113,10 +125,51 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
         </section>
       ) : null}
 
-      <p className="mt-10 text-center text-xs leading-5 text-navy/70">
-        Need to cancel or transfer your place?{" "}
-        <a href={WHATSAPP_URL} className="underline underline-offset-4">Message Tanya</a> and we&rsquo;ll follow your booking&rsquo;s
-        cancellation policy.
+      {selfService && canTransfer ? (
+        <section className="mt-10">
+          <h2 className="font-serif text-xl">Transfer a place</h2>
+          <p className="mt-1 text-xs leading-5 text-navy/70">
+            Give a place to someone else, free of charge. They&rsquo;ll be emailed to complete their own details.
+          </p>
+          <div className="mt-4 space-y-6">
+            {b.guests.map((g) => (
+              <details key={g.id} className="border border-sand p-4">
+                <summary className="cursor-pointer text-sm">{g.isBooker ? `Your place (${g.name})` : `${g.name}'s place`}</summary>
+                <div className="mt-4">
+                  <ConfirmForm
+                    action={transferAction}
+                    fields={{ guestId: g.id }}
+                    confirmLabel={`I confirm ${g.isBooker ? "my" : `${g.name}'s`} place goes to this person.`}
+                    label="Transfer this place"
+                    pendingLabel="Transferring"
+                  >
+                    <label className="block text-xs">
+                      New guest&rsquo;s name
+                      <input name="name" required maxLength={120} autoComplete="off" className="mt-1 w-full border border-sand bg-transparent px-2 py-2 text-sm" />
+                    </label>
+                    <label className="block text-xs">
+                      New guest&rsquo;s email
+                      <input name="email" type="email" required maxLength={254} autoComplete="off" className="mt-1 w-full border border-sand bg-transparent px-2 py-2 text-sm" />
+                    </label>
+                  </ConfirmForm>
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {selfService && q.cancel === "1" ? <CancelPanel bookingId={b.id} /> : null}
+      {selfService && q.cancel !== "1" ? (
+        <p className="mt-10 text-center text-xs">
+          <Link href={`/account/bookings/${b.id}?cancel=1`} className="underline underline-offset-4" data-testid="cancel-link">
+            Cancel this booking
+          </Link>
+        </p>
+      ) : null}
+
+      <p className="mt-6 text-center text-xs leading-5 text-navy/70">
+        Questions about your booking? <a href={WHATSAPP_URL} className="underline underline-offset-4">Message Tanya</a>.
       </p>
     </div>
   );

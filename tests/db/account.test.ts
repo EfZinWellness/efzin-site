@@ -60,8 +60,8 @@ describe("loadBookings", () => {
     expect(b.schedule.every((i) => i.currency === "EUR")).toBe(true);
     expect(b.schedule[1].dueOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(b.guests).toEqual([
-      { name: "Layla Haddad", detailsComplete: false, isBooker: true },
-      { name: "Sara Khan", detailsComplete: false, isBooker: false },
+      { id: expect.any(String), name: "Layla Haddad", detailsComplete: false, isBooker: true },
+      { id: expect.any(String), name: "Sara Khan", detailsComplete: false, isBooker: false },
     ]);
     expect(pendingGuests(upcoming)).toEqual([{ bookingId, title: "Test Retreat", name: "Sara Khan" }]);
   });

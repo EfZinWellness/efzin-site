@@ -151,7 +151,8 @@ export async function confirmPendingInTx(
 
   await db.query(
     `update bookings set status = $2, amount_aed_minor = $3, amount_paid_base_minor = $4,
-            gift_card_applied_aed_minor = $5, credit_applied_aed_minor = $6, policy_snapshot = $7::jsonb
+            gift_card_applied_aed_minor = $5, credit_applied_aed_minor = $6, policy_snapshot = $7::jsonb,
+            gift_card_applied_base_minor = $8, credit_applied_base_minor = $9
       where id = $1`,
     [
       bookingId,
@@ -169,6 +170,8 @@ export async function confirmPendingInTx(
         ...(creditLost ? { credit_claim_lost: true } : {}),
         ...(giftLost ? { gift_claim_lost: true } : {}),
       }),
+      giftOk ? p.allocation.giftUsedBaseMinor : 0,
+      creditOk ? p.allocation.creditUsedBaseMinor : 0,
     ],
   );
 

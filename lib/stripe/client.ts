@@ -2,6 +2,17 @@ import Stripe from "stripe";
 
 type PaymentMethodRef = string | { id: string } | null;
 
+/** The fields of a Charge the cancellation refunds read (balance_transaction expanded). */
+export interface ChargeRef {
+  id: string;
+  amount: number;
+  amount_refunded: number;
+  currency: string;
+  created: number;
+  status: string;
+  balance_transaction: string | { fee: number; currency: string; exchange_rate: number | null } | null;
+}
+
 /**
  * The slice of the Stripe client this app uses. The real `Stripe` instance satisfies it;
  * tests pass a typed fake so the real API is never called.
@@ -19,7 +30,20 @@ export interface StripeApi {
         options?: Stripe.RequestOptions,
       ): Promise<{ id: string }>;
       retrieve(id: string): Promise<{ id: string; status: Stripe.Checkout.Session.Status | null }>;
+      list(params: Stripe.Checkout.SessionListParams): Promise<{
+        data: { id: string; metadata: Stripe.Metadata | null }[];
+        has_more: boolean;
+      }>;
     };
+  };
+  charges: {
+    list(params: Stripe.ChargeListParams): Promise<{ data: ChargeRef[]; has_more: boolean }>;
+  };
+  invoicePayments: {
+    list(params: Stripe.InvoicePaymentListParams): Promise<{
+      data: { id: string; status: string; payment: { type: string; payment_intent?: string | { id: string } | null } }[];
+      has_more: boolean;
+    }>;
   };
   customers: {
     create(params: Stripe.CustomerCreateParams, options?: Stripe.RequestOptions): Promise<{ id: string }>;

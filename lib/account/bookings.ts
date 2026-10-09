@@ -12,6 +12,8 @@ export interface AccountScheduleItem {
 }
 
 export interface AccountGuest {
+  /** booking_guests id (the target of a transfer). */
+  id: string;
   name: string;
   detailsComplete: boolean;
   isBooker: boolean;
@@ -89,15 +91,15 @@ async function attach(db: SqlClient, rows: Row[]): Promise<AccountBooking[]> {
       list.push({ seq: i.seq, dueOn: i.due_on, amountMinor: i.amount_minor, currency: i.currency, status: i.status });
       schedule.set(i.booking_id, list);
     }
-    const gs = await db.query<{ booking_id: string; name: string; details_complete: boolean; is_booker: boolean }>(
-      `select g.booking_id, p.name, g.details_complete, g.is_booker
+    const gs = await db.query<{ id: string; booking_id: string; name: string; details_complete: boolean; is_booker: boolean }>(
+      `select g.id, g.booking_id, p.name, g.details_complete, g.is_booker
          from booking_guests g join people p on p.id = g.person_id
         where g.booking_id = any($1::uuid[]) order by g.booking_id, g.is_booker desc, p.name`,
       [mine],
     );
     for (const g of gs.rows) {
       const list = guests.get(g.booking_id) ?? [];
-      list.push({ name: g.name, detailsComplete: g.details_complete, isBooker: g.is_booker });
+      list.push({ id: g.id, name: g.name, detailsComplete: g.details_complete, isBooker: g.is_booker });
       guests.set(g.booking_id, list);
     }
   }

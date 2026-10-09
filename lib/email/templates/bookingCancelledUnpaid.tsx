@@ -34,7 +34,7 @@ export const bookingCancelledUnpaid: EmailTemplate = {
             ["Experience", str(d.experience)],
             ["Unpaid balance", unpaid],
             ["Balance due date", due],
-            ["Refund", refund > 0 ? money(refund, d.currency) : ""],
+            ["Refund", refund > 0 ? money(refund, d.refundCurrency ?? d.currency) : ""],
           ]}
         />
         <P>

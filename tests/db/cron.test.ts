@@ -289,6 +289,37 @@ describe("daily job: unpaid at the balance due date", () => {
     expect(await status("bookings", b.bookingId)).toBe("cancelled");
   });
 
+  it("an event on a deposit plan cancelled more than 48h out refunds what the policy gives back (deposit minus fee), through the guest-cancellation maths", async () => {
+    const b = await seedBooking(w.db, {
+      slug: "test-event",
+      status: "deposit_paid",
+      booker: { name: "Eve E", email: "eve@x.com", customer: "cus_ev" },
+      items: [
+        { seq: 0, dueOn: "2027-01-10", amount: 5600, status: "paid" },
+        { seq: 1, dueOn: "2027-01-20", amount: 22400, status: "failed", invoice: "in_ev" },
+      ],
+    });
+    await w.db.query("update bookings set stripe_payment_intent = 'pi_ev' where id = $1", [b.bookingId]);
+    w.stripe.invoiceStatus.in_ev = "open";
+    w.stripe.addCharge({ id: "ch_ev", paymentIntent: "pi_ev", amount: 5600, currency: "aed", fee: 400, created: 1 });
+
+    await runDaily(w.db, at("2027-01-23"), deps);
+    const row = (
+      await w.db.query<{ status: string; cancel_reason: string; cancelled_by: string }>(
+        "select status, cancel_reason, cancelled_by from bookings where id = $1",
+        [b.bookingId],
+      )
+    ).rows[0];
+    expect(row).toEqual({ status: "refunded", cancel_reason: "unpaid_balance", cancelled_by: "guest" });
+    expect(w.stripe.refundsCreated.map((r) => ({ charge: r.params.charge, amount: r.params.amount }))).toEqual([
+      { charge: "ch_ev", amount: 5200 },
+    ]);
+    expect(w.stripe.voided).toEqual(["in_ev"]);
+    expect(w.stripe.invoicesCreated).toEqual([]);
+    expect(kinds(sent)).toEqual([`booking_cancelled_unpaid>${ADMIN}`, "booking_cancelled_unpaid>eve@x.com"]);
+    expect(sent.find((s) => s.to === "eve@x.com")!.text).toContain("AED 52");
+  });
+
   it("a cancellation notice that failed to send is sent on the next run, exactly once", async () => {
     const b = await attemptedAndFailed();
     fail(true);

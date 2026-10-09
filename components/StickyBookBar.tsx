@@ -17,7 +17,7 @@ export default function StickyBookBar({ experience: e, status, visitorCurrency, 
   const price = headlinePrice(e);
   let cta: { label: string; href: string };
   if (status === "interest") cta = { label: "Register interest", href: interestHref(e.slug) };
-  else if (status === "sold_out") cta = { label: "Join waitlist", href: `${bookHref(e.slug)}?waitlist=1` };
+  else if (status === "sold_out") cta = { label: "Join waitlist", href: `/waitlist/${e.slug}` };
   else cta = { label: "Book", href: bookHref(e.slug) };
 
   return (

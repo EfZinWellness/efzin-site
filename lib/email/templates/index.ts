@@ -5,7 +5,9 @@ import { adminError } from "./adminError";
 import { adminNewBooking } from "./adminNewBooking";
 import { adminPaymentFailed } from "./adminPaymentFailed";
 import { balanceReminder } from "./balanceReminder";
+import { bookingCancelled } from "./bookingCancelled";
 import { bookingCancelledUnpaid } from "./bookingCancelledUnpaid";
+import { bookingTransferred } from "./bookingTransferred";
 import { bookingConfirmed } from "./bookingConfirmed";
 import { creditExpiring } from "./creditExpiring";
 import { dayAfter } from "./dayAfter";
@@ -47,4 +49,6 @@ export const TEMPLATES: Record<EmailKind, EmailTemplate> = {
   gift_card_used: giftCardUsed,
   gift_card_expiring: giftCardExpiring,
   booking_cancelled_unpaid: bookingCancelledUnpaid,
+  booking_cancelled: bookingCancelled,
+  booking_transferred: bookingTransferred,
 };
