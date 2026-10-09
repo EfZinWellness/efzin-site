@@ -49,6 +49,54 @@ export function reasonsFor(i: { status: string; attempts: number; dueOn: string;
   return out;
 }
 
+export interface UnrefundedPayment {
+  /** inactive_invoice: a scheduled payment taken after the booking was cancelled; pay_rest_excess: "Pay the rest now" overpaid. */
+  kind: "inactive_invoice" | "pay_rest_excess";
+  /** The Stripe invoice id or Checkout session id. */
+  ref: string;
+  bookingId: string | null;
+  slug: string | null;
+  title: string | null;
+  amountMinor: number;
+  currency: string | null;
+  /** When the payment was seen (ISO). */
+  seenAt: string;
+  bookerName: string | null;
+  bookerEmail: string | null;
+  bookerPhone: string | null;
+}
+
+/**
+ * Money the site should have given back automatically and has not yet (the refund failed, or
+ * for a pay-rest excess without a payment id, cannot be made automatically). The daily job
+ * retries the refunds; Tanya refunds by hand whatever stays here.
+ */
+export async function loadUnrefunded(db: SqlClient): Promise<UnrefundedPayment[]> {
+  const r = await db.query<{
+    kind: "inactive_invoice" | "pay_rest_excess"; ref: string; booking_id: string | null; slug: string | null;
+    title: string | null; amount: number; currency: string | null; seen_at: string | Date;
+    name: string | null; email: string | null; phone: string | null;
+  }>(
+    `select x.kind, x.ref, x.booking_id, e.slug, e.title, x.amount, x.currency, x.seen_at, p.name, p.email, p.phone
+       from (
+         select 'inactive_invoice' as kind, invoice_id as ref, booking_id, amount_minor as amount, currency, created_at as seen_at
+           from invoice_refunds where refund_id is null
+         union all
+         select 'pay_rest_excess', session_id, booking_id, excess_minor, currency, created_at
+           from pay_rest_settlements where refund_id is null and excess_minor > 0
+       ) x
+       left join bookings b on b.id = x.booking_id
+       left join experiences e on e.id = b.experience_id
+       left join people p on p.id = b.booker_person_id
+      order by x.seen_at, x.ref`,
+  );
+  return r.rows.map((x) => ({
+    kind: x.kind, ref: x.ref, bookingId: x.booking_id, slug: x.slug, title: x.title, amountMinor: x.amount,
+    currency: x.currency ? x.currency.toUpperCase() : null, seenAt: new Date(x.seen_at).toISOString(),
+    bookerName: x.name, bookerEmail: x.email, bookerPhone: x.phone,
+  }));
+}
+
 export async function loadPaymentsDue(db: SqlClient, today: string): Promise<PaymentsDue> {
   const r = await db.query<{
     id: string; booking_id: string; seq: number; due_on: string; amount_minor: number; currency: string;

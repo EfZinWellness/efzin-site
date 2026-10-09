@@ -4,7 +4,7 @@ import { sendQuietly } from "../email/send";
 import { aedValueOf } from "../payments/aed";
 import { balanceDueDate } from "../payments/schedule";
 import { adminAddress } from "../requests/handlers";
-import { refId } from "./client";
+import { refundInactiveInvoiceNow } from "./autoRefunds";
 import { sequence, type AfterCommit } from "./events";
 import type { WebhookDeps } from "./handlers";
 import { ACTIVE_BOOKING } from "./invoices";
@@ -175,32 +175,23 @@ async function refundInactiveInvoice(invoice: Stripe.Invoice, item: ItemRow, dep
     currency: invoice.currency,
   };
   return async () => {
-    const metadata = { kind: "inactive_invoice", booking_id: item.booking_id, invoice_id: invoice.id };
     try {
-      const payments = await deps.stripe.invoicePayments.list({ invoice: invoice.id, status: "paid", limit: 10 });
-      const pi = refId(payments.data[0]?.payment.payment_intent ?? null);
-      if (!pi) throw new Error(`No payment found for invoice ${invoice.id}`);
-      const earlier = (await deps.stripe.refunds.list({ payment_intent: pi, limit: 100 })).data.find(
-        (r) => r.metadata?.kind === metadata.kind && r.metadata?.invoice_id === invoice.id && r.status !== "failed" && r.status !== "canceled",
-      );
-      const refund =
-        earlier ??
-        (await deps.stripe.refunds.create(
-          { payment_intent: pi, amount: invoice.amount_paid, metadata },
-          { idempotencyKey: `efzin-inactive-invoice-refund-${invoice.id}` },
-        ));
-      await db.query("update invoice_refunds set refund_id = $2 where invoice_id = $1", [invoice.id, refund.id]);
+      const refundId = await refundInactiveInvoiceNow(db, deps.stripe, {
+        invoice_id: invoice.id,
+        booking_id: item.booking_id,
+        amount_minor: invoice.amount_paid,
+      });
       await alertTanya(
         deps,
         "payment_on_inactive_booking_refunded",
         `A scheduled payment was taken on booking ${item.booking_id} after it was cancelled. It was refunded in full automatically.`,
-        { ...facts, refundId: refund.id },
+        { ...facts, refundId },
       )();
     } catch (err) {
       await alertTanya(
         deps,
         "payment_on_inactive_booking_refund_failed",
-        `Payment received on cancelled booking ${item.booking_id}; the automatic refund failed, please refund it by hand.`,
+        `Payment received on cancelled booking ${item.booking_id}; the automatic refund failed. The daily job retries it, and it is listed on the admin Payments page until it goes through; refund it by hand if it stays there.`,
         { ...facts, error: err instanceof Error ? err.message : String(err) },
       )();
     }

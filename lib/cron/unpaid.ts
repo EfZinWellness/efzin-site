@@ -1,6 +1,7 @@
 import { cancelBooking } from "../booking/cancel";
 import { dubaiToday } from "../giftcards/dates";
 import { adminAddress } from "../requests/handlers";
+import { pendingAutoRefunds, refundInactiveInvoiceNow, refundPayRestExcessNow } from "../stripe/autoRefunds";
 import type { StripeApi } from "../stripe/client";
 import { settleCancellation } from "../stripe/refund";
 import { mail, report, type JobContext } from "./context";
@@ -91,6 +92,42 @@ export async function finishPendingRefunds(ctx: JobContext, stripe: StripeApi | 
     }
   }
   return r.rows.length;
+}
+
+/**
+ * Automatic refunds outside a cancellation that failed when first tried (a payment taken on an
+ * inactive booking, a pay-rest excess) are retried every day until they go through, through
+ * the stored amounts, the same idempotency keys and adoption of an earlier refund. Until then
+ * /admin/payments lists them. Returns how many were refunded in this run.
+ */
+export async function retryAutoRefunds(ctx: JobContext, stripe: StripeApi | null): Promise<number> {
+  const { invoices, payRest } = await pendingAutoRefunds(ctx.db);
+  if (invoices.length + payRest.length === 0) return 0;
+  if (!stripe) {
+    await report(ctx, new Error("STRIPE_SECRET_KEY is not configured: automatic refunds not retried"), "daily_auto_refunds", {
+      invoices: invoices.map((r) => r.invoice_id),
+      sessions: payRest.map((r) => r.session_id),
+    });
+    return 0;
+  }
+  let done = 0;
+  for (const row of invoices) {
+    try {
+      await refundInactiveInvoiceNow(ctx.db, stripe, row);
+      done++;
+    } catch (err) {
+      await report(ctx, err, `daily_auto_refund_${row.invoice_id}`, { bookingId: row.booking_id, invoiceId: row.invoice_id });
+    }
+  }
+  for (const row of payRest) {
+    try {
+      await refundPayRestExcessNow(ctx.db, stripe, row);
+      done++;
+    } catch (err) {
+      await report(ctx, err, `daily_auto_refund_${row.session_id}`, { bookingId: row.booking_id, session: row.session_id });
+    }
+  }
+  return done;
 }
 
 /**

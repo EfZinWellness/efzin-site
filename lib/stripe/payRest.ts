@@ -3,6 +3,7 @@ import type { SqlClient } from "../content/sync";
 import { sendQuietly, type SendEmailFn } from "../email/send";
 import { aedValueOf } from "../payments/aed";
 import { adminAddress } from "../requests/handlers";
+import { refundPayRestExcessNow } from "./autoRefunds";
 import { refId, type StripeApi } from "./client";
 import { sequence, type AfterCommit } from "./events";
 import { revenueUnknown } from "./invoiceEvents";
@@ -154,13 +155,14 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
     toRefund &&
       (async () => {
         try {
-          const refund = await deps.stripe.refunds.create(
-            { payment_intent: pi!, amount: st.excess_minor },
-            { idempotencyKey: `efzin-payrest-refund-${s.id}` },
-          );
-          await deps.db.query("update pay_rest_settlements set refund_id = $2 where session_id = $1", [s.id, refund.id]);
+          await refundPayRestExcessNow(deps.db, deps.stripe, {
+            session_id: s.id,
+            booking_id: st.booking_id,
+            payment_intent: pi!,
+            excess_minor: st.excess_minor,
+          });
         } catch (err) {
-          // Don't fail the event: the invoices still get voided and Tanya refunds by hand.
+          // Don't fail the event: the invoices still get voided, the daily job retries the refund.
           refundFailed = err instanceof Error ? err.message : String(err);
           console.error("[pay_rest] automatic refund failed", s.id, err);
         }
@@ -170,7 +172,8 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
       refundFailed !== null
         ? sendQuietly(deps.sendEmail, "admin_error", adminAddress(), {
             context: "pay_rest_refund_failed",
-            problem: "A guest overpaid when paying the rest of a booking and the automatic refund failed. Please refund the excess by hand.",
+            problem:
+              "A guest overpaid when paying the rest of a booking and the automatic refund failed. The daily job retries it, and it is listed on the admin Payments page until it goes through; refund the excess by hand if it stays there.",
             ...details,
             excessMinor: st.excess_minor,
             error: refundFailed,

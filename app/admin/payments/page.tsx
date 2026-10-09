@@ -1,13 +1,25 @@
 import Link from "next/link";
 import { ExportLink, NoDatabase, PageTitle, Stat } from "@/components/admin/ui";
 import { adminDb } from "@/lib/admin/access";
-import { dubaiToday, loadPaymentsDue, type AttentionReason, type PaymentItem } from "@/lib/admin/payments";
+import {
+  dubaiToday,
+  loadPaymentsDue,
+  loadUnrefunded,
+  type AttentionReason,
+  type PaymentItem,
+  type UnrefundedPayment,
+} from "@/lib/admin/payments";
 import { formatExpiry } from "@/lib/account/format";
 
 const REASONS: Record<AttentionReason, string> = {
   failed: "Payment failed",
   repeated_failures: "Failed 2 or more times",
   not_attempted: "Past due, never attempted",
+};
+
+const UNREFUNDED: Record<UnrefundedPayment["kind"], string> = {
+  inactive_invoice: "Instalment charged after the booking was cancelled",
+  pay_rest_excess: "Overpaid with “Pay the rest now”",
 };
 
 const money = (minor: number, currency: string) =>
@@ -52,11 +64,44 @@ function Table({ items, chase }: { items: PaymentItem[]; chase: boolean }) {
 export default async function PaymentsDuePage() {
   const db = await adminDb();
   if (!db) return <><PageTitle>Payments due</PageTitle><NoDatabase /></>;
-  const p = await loadPaymentsDue(db, dubaiToday(new Date()));
+  const [p, unrefunded] = await Promise.all([loadPaymentsDue(db, dubaiToday(new Date())), loadUnrefunded(db)]);
 
   return (
     <>
       <PageTitle sub="Instalments due in the next 30 days, payments to chase, and what is still to collect.">Payments due</PageTitle>
+
+      {unrefunded.length > 0 ? (
+        <>
+          <h2 className="mt-8 font-serif text-xl text-oxblood">Refunds still to make</h2>
+          <p className="mt-2 text-sm text-navy/80">
+            Money the site should have given back automatically but could not yet. It retries every morning; refund by hand in
+            Stripe anything that stays here.
+          </p>
+          <table className="stack mt-4">
+            <thead>
+              <tr><th>Seen</th><th>Why</th><th>Experience</th><th>Amount</th><th>Stripe</th><th>Booker</th><th>Contact</th></tr>
+            </thead>
+            <tbody>
+              {unrefunded.map((u) => (
+                <tr key={u.ref}>
+                  <td className="lead">{day(u.seenAt.slice(0, 10))}</td>
+                  <td data-label="Why">{UNREFUNDED[u.kind]}</td>
+                  <td data-label="Experience">
+                    {u.slug ? <Link href={`/admin/experiences/${u.slug}`} className="underline underline-offset-4">{u.title}</Link> : "Unknown booking"}
+                  </td>
+                  <td data-label="Amount">{u.currency ? money(u.amountMinor, u.currency) : u.amountMinor}</td>
+                  <td data-label="Stripe">{u.ref}</td>
+                  <td data-label="Booker">{u.bookerName ?? ""}</td>
+                  <td data-label="Contact">
+                    {u.bookerEmail ? <a href={`mailto:${u.bookerEmail}`} className="underline underline-offset-4">{u.bookerEmail}</a> : null}
+                    {u.bookerPhone ? <span className="block"><a href={`tel:${u.bookerPhone}`} className="underline underline-offset-4">{u.bookerPhone}</a></span> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
 
       <h2 className="mt-8 font-serif text-xl">To chase</h2>
       {p.attention.length === 0 ? (

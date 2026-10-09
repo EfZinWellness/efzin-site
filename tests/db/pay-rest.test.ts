@@ -71,7 +71,11 @@ describe("pay_rest completion", () => {
     expect(await status()).toBe("paid");
     expect(w.stripe.refundsCreated).toEqual([
       {
-        params: { payment_intent: "pi_rest_1", amount: items[1].amount_minor },
+        params: {
+          payment_intent: "pi_rest_1",
+          amount: items[1].amount_minor,
+          metadata: { kind: "pay_rest_excess", booking_id: bookingId, session_id: "cs_rest_1" },
+        },
         options: { idempotencyKey: "efzin-payrest-refund-cs_rest_1" },
       },
     ]);
@@ -151,7 +155,11 @@ describe("pay_rest completion", () => {
     expect(await status()).toBe("cancelled");
     expect(await count(w.db, "select * from payment_schedule_items where status = 'paid'")).toBe(1); // deposit only
     expect(w.stripe.refundsCreated).toHaveLength(1);
-    expect(w.stripe.refundsCreated[0].params).toEqual({ payment_intent: "pi_rest_1", amount: unpaidSum() });
+    expect(w.stripe.refundsCreated[0].params).toEqual({
+      payment_intent: "pi_rest_1",
+      amount: unpaidSum(),
+      metadata: { kind: "pay_rest_excess", booking_id: bookingId, session_id: "cs_rest_1" },
+    });
     expect(w.emails.filter((e) => e.kind === "admin_error")).toHaveLength(1);
   });
 

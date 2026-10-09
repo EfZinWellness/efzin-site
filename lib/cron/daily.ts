@@ -5,7 +5,7 @@ import type { StripeApi } from "../stripe/client";
 import { step, type JobContext } from "./context";
 import { chargeDueItems, remindUpcomingPayments } from "./payments";
 import { remindExpiringCredits, remindExpiringGiftCards, remindGuests, type ExperienceInfo } from "./reminders";
-import { cancelUnpaidBookings, finishPendingRefunds, sendUnpaidCancellationNotices } from "./unpaid";
+import { cancelUnpaidBookings, finishPendingRefunds, retryAutoRefunds, sendUnpaidCancellationNotices } from "./unpaid";
 
 export interface DailyDeps {
   /** Null when Stripe is not configured: charging and voiding are skipped and reported. */
@@ -21,6 +21,8 @@ export interface DailySummary {
   unpaidNotices: number | null;
   /** Bookings whose failed cancellation refunds were retried. */
   refundRetries: number | null;
+  /** Automatic refunds (late payment on an inactive booking, pay-rest excess) made on retry. */
+  autoRefundRetries: number | null;
   charged: number | null;
   paymentReminders: number | null;
   guestEmails: number | null;
@@ -43,6 +45,7 @@ export async function runDaily(db: SqlClient, now: Date, deps: DailyDeps): Promi
     cancelledUnpaid,
     unpaidNotices: await step(ctx, "daily_unpaid_notices", () => sendUnpaidCancellationNotices(ctx)),
     refundRetries: await step(ctx, "daily_refund_retries", () => finishPendingRefunds(ctx, deps.stripe)),
+    autoRefundRetries: await step(ctx, "daily_auto_refunds", () => retryAutoRefunds(ctx, deps.stripe)),
     // Late catch-up only when the cancel step ran: its rules are what keep a late charge safe.
     charged: await step(ctx, "daily_charge", () => chargeDueItems(ctx, deps.stripe, { catchUp: cancelledUnpaid !== null })),
     paymentReminders: await step(ctx, "daily_payment_reminders", () => remindUpcomingPayments(ctx, deps.stripe)),
