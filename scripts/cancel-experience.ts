@@ -10,6 +10,7 @@
 import { Pool } from "pg";
 import { runCancelExperience } from "../lib/booking/cancelExperience";
 import type { SqlClient } from "../lib/content/sync";
+import { poolConfig } from "../lib/db/pool";
 import { sendEmail } from "../lib/email/send";
 import { getStripe } from "../lib/stripe/client";
 import { SITE_URL } from "../lib/site";
@@ -31,7 +32,7 @@ async function main(): Promise<number> {
     return 1;
   }
   // One connection, so the cancellation transactions run on the same session.
-  const pool = new Pool({ connectionString: url, max: 1 });
+  const pool = new Pool({ ...poolConfig(url), max: 1 });
   const conn = await pool.connect();
   const db: SqlClient = {
     async query<T = unknown>(sql: string, params?: unknown[]) {

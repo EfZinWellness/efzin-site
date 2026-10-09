@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import type { SqlClient } from "../lib/content/sync";
+import { poolConfig } from "../lib/db/pool";
 import { importSquarespace, type ProductMap } from "../lib/import/squarespace";
 
 function arg(name: string): string | undefined {
@@ -27,7 +28,7 @@ async function main(): Promise<number> {
 
   const map = JSON.parse(readFileSync(mapFile, "utf8")) as ProductMap;
   // One connection, so begin/commit/rollback inside the importer are on the same session.
-  const pool = new Pool({ connectionString: url, max: 1 });
+  const pool = new Pool({ ...poolConfig(url), max: 1 });
   const db: SqlClient = {
     async query<T = unknown>(sql: string, params?: unknown[]) {
       const r = await pool.query(sql, params);

@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import { loadExperiences } from "../lib/content/load";
 import { syncContent, type SqlClient } from "../lib/content/sync";
+import { poolConfig } from "../lib/db/pool";
 
 async function main(): Promise<number> {
   const url = process.env.DATABASE_URL;
@@ -10,7 +11,7 @@ async function main(): Promise<number> {
   }
 
   const experiences = await loadExperiences();
-  const pool = new Pool({ connectionString: url, max: 1 });
+  const pool = new Pool({ ...poolConfig(url), max: 1 });
   const db: SqlClient = {
     async query<T = unknown>(sql: string, params?: unknown[]) {
       const r = await pool.query(sql, params);
