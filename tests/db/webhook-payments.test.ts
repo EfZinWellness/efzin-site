@@ -2,9 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { handleStripeEvent } from "../../lib/stripe/handlers";
 import { chargeScheduledItem } from "../../lib/stripe/invoices";
 import { issueGiftCards } from "../../lib/giftcards/db";
+import { convertMinor } from "../../lib/pricing/convert";
+import { seedBooking } from "./cronFixtures";
 import {
   EVENT,
   NOW,
+  RATES,
   buyerId,
   checkout,
   count,
@@ -116,6 +119,49 @@ describe("scheduled payments", () => {
       "processed",
     );
     expect(w.emails).toEqual([]);
+  });
+});
+
+describe("revenue in AED (bookings.amount_aed_minor) follows every payment", () => {
+  const aedOf = async (id: string) =>
+    (await w.db.query<{ a: number }>("select amount_aed_minor as a from bookings where id = $1", [id])).rows[0].a;
+
+  it("an instalment paid in EUR adds its AED value at the day's rates", async () => {
+    const { bookingId, items } = await planBooking(w);
+    const before = await aedOf(bookingId);
+    expect(before).toBe(convertMinor(48000, "EUR", "AED", { ...RATES, USD: 1 }, "round"));
+    await handleStripeEvent(invoiceEvent("evt_ip", "invoice.paid", items[1].id, bookingId), w.deps);
+    expect(await aedOf(bookingId)).toBe(before + convertMinor(192000, "EUR", "AED", { ...RATES, USD: 1 }, "round"));
+  });
+
+  it("an instalment of an AED booking adds exactly its amount", async () => {
+    const b = await seedBooking(w.db, {
+      slug: "test-event",
+      status: "deposit_paid",
+      booker: { name: "Eve E", email: "eve@x.com" },
+      items: [
+        { seq: 0, dueOn: "2027-01-10", amount: 5600, status: "paid" },
+        { seq: 1, dueOn: "2027-01-20", amount: 22400, status: "scheduled" },
+      ],
+    });
+    await handleStripeEvent(
+      invoiceEvent("evt_aed", "invoice.paid", b.itemIds[1], b.bookingId, { amount_paid: 22400, currency: "aed" }),
+      w.deps,
+    );
+    expect(await aedOf(b.bookingId)).toBe(28000);
+    expect(await bookingStatus(b.bookingId)).toBe("paid");
+  });
+
+  it("without exchange rates the payment is still recorded, the AED value is left out and Tanya is told", async () => {
+    const { bookingId, items } = await planBooking(w);
+    const before = await aedOf(bookingId);
+    await handleStripeEvent(invoiceEvent("evt_ip", "invoice.paid", items[1].id, bookingId), { ...w.deps, usdRates: async () => ({}) });
+    expect((await item(items[1].id)).status).toBe("paid");
+    expect(await aedOf(bookingId)).toBe(before);
+    expect(w.emails.map((e) => [e.kind, e.data.context]).sort()).toEqual([
+      ["admin_error", "revenue_aed_unknown"],
+      ["scheduled_payment_receipt", undefined],
+    ]);
   });
 });
 

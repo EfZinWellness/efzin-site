@@ -1,5 +1,17 @@
 import type { SqlClient } from "../content/sync";
 
+/**
+ * Bookings whose amount_aed_minor counts as revenue. amount_aed_minor is the AED value of
+ * everything paid on the booking: the checkout payment (gift and credit applied included) plus
+ * every instalment and "Pay the rest now" payment, each converted on the day it was paid.
+ * - paid / deposit_paid: all of it.
+ * - cancelled: a cancellation with nothing given back (e.g. a deposit kept when the balance went
+ *   unpaid), so all of it was kept. Late payments refunded automatically are never added to it.
+ * - refunded / credited: left out entirely, even when the policy kept part of the money (the
+ *   refunded AED is not tracked per booking; credit is counted when it is spent on a booking).
+ */
+export const REVENUE_STATUSES = "'paid', 'deposit_paid', 'cancelled'";
+
 export interface UpcomingExperience {
   id: string;
   slug: string;
@@ -14,7 +26,7 @@ export interface UpcomingExperience {
   sold: number;
   /** Capacity minus sold minus spots in unreleased holds (what the public site offers). */
   remaining: number;
-  /** Sum of amount_aed_minor of paid / deposit_paid bookings (gift and credit applied are already inside it). */
+  /** Sum of amount_aed_minor of the bookings in REVENUE_STATUSES (gift and credit applied are already inside it). */
   revenueAedMinor: number;
   /** Paying guests who have not completed their details (health and waiver). */
   missingDetails: number;
@@ -35,7 +47,7 @@ export async function loadUpcoming(db: SqlClient, now: Date): Promise<UpcomingEx
                        where b.experience_id = e.id and b.status in ('paid', 'deposit_paid')), 0)::int as sold,
             coalesce((select sum(available_spots(t.id)) from ticket_types t where t.experience_id = e.id), 0)::int as remaining,
             coalesce((select sum(b.amount_aed_minor) from bookings b
-                       where b.experience_id = e.id and b.status in ('paid', 'deposit_paid')), 0)::int as revenue,
+                       where b.experience_id = e.id and b.status in (${REVENUE_STATUSES})), 0)::int as revenue,
             coalesce((select count(*) from booking_guests g join bookings b on b.id = g.booking_id
                        where b.experience_id = e.id and b.status in ('paid', 'deposit_paid')
                          and not g.details_complete), 0)::int as missing
@@ -59,7 +71,7 @@ export async function loadUpcoming(db: SqlClient, now: Date): Promise<UpcomingEx
  */
 export async function loadRevenue(db: SqlClient): Promise<{ experienceAedMinor: number; giftSalesAedMinor: number }> {
   const r = await db.query<{ exp: number; gift: number }>(
-    `select coalesce((select sum(amount_aed_minor) from bookings where status in ('paid', 'deposit_paid')), 0)::int as exp,
+    `select coalesce((select sum(amount_aed_minor) from bookings where status in (${REVENUE_STATUSES})), 0)::int as exp,
             coalesce((select sum(amount_aed_minor) from gift_card_ledger where reason = 'issue'), 0)::int as gift`,
   );
   return { experienceAedMinor: r.rows[0].exp, giftSalesAedMinor: r.rows[0].gift };

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { handleStripeEvent } from "../../lib/stripe/handlers";
 import { startPayRest } from "../../lib/stripe/selfServe";
 import { chargeScheduledItem } from "../../lib/stripe/invoices";
-import { NOW, ORIGIN, count, event, invoiceEvent, planBooking, world, type World } from "./webhookFixtures";
+import { convertMinor } from "../../lib/pricing/convert";
+import { NOW, ORIGIN, RATES, count, event, invoiceEvent, planBooking, world, type World } from "./webhookFixtures";
 
 let w: World;
 let bookingId: string;
@@ -47,6 +48,13 @@ describe("pay_rest completion", () => {
     expect(await count(w.db, "select * from payment_schedule_items where status <> 'paid'")).toBe(0);
     expect(w.stripe.refundsCreated).toEqual([]);
     expect(w.emails.filter((e) => e.kind === "admin_error")).toEqual([]);
+  });
+
+  it("adds the AED value of what it settled to the booking's revenue", async () => {
+    const aed = async () => (await w.db.query<{ a: number }>("select amount_aed_minor as a from bookings")).rows[0].a;
+    const before = await aed();
+    await handleStripeEvent(await payRestEvent(), w.deps);
+    expect(await aed()).toBe(before + convertMinor(unpaidSum(), "EUR", "AED", { ...RATES, USD: 1 }, "round"));
   });
 
   it("refunds the excess when an instalment was paid in between, and tells Tanya", async () => {

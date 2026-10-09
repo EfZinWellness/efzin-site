@@ -1,10 +1,11 @@
 import type Stripe from "stripe";
 import type { SqlClient } from "../content/sync";
 import { sendQuietly } from "../email/send";
+import { aedValueOf } from "../payments/aed";
 import { balanceDueDate } from "../payments/schedule";
 import { adminAddress } from "../requests/handlers";
 import { refId } from "./client";
-import type { AfterCommit } from "./events";
+import { sequence, type AfterCommit } from "./events";
 import type { WebhookDeps } from "./handlers";
 import { ACTIVE_BOOKING } from "./invoices";
 
@@ -107,23 +108,48 @@ export async function onInvoicePaid(invoice: Stripe.Invoice, deps: WebhookDeps):
     [item.booking_id],
   );
   const remaining = left.rows[0].n;
+  // Revenue in AED grows with every payment (exact for AED, today's rate otherwise).
+  const aed = await aedValueOf(item.amount_minor, item.currency, deps.usdRates);
   await db.query(
     `update bookings set amount_paid_base_minor = coalesce(amount_paid_base_minor, 0) + $2,
+            amount_aed_minor = coalesce(amount_aed_minor, 0) + $4,
             status = case when $3 then 'paid' else status end
       where id = $1`,
-    [item.booking_id, item.amount_minor, remaining === 0],
+    [item.booking_id, item.amount_minor, remaining === 0, aed ?? 0],
   );
-  return async () => {
-    await sendQuietly(deps.sendEmail, "scheduled_payment_receipt", item.booker_email, {
-      name: item.booker_name,
-      experience: item.title,
-      amountMinor: item.amount_minor,
-      currency: item.currency,
-      remainingMinor: remaining,
-      bookingId: item.booking_id,
+  return sequence(
+    async () => {
+      await sendQuietly(deps.sendEmail, "scheduled_payment_receipt", item.booker_email, {
+        name: item.booker_name,
+        experience: item.title,
+        amountMinor: item.amount_minor,
+        currency: item.currency,
+        remainingMinor: remaining,
+        bookingId: item.booking_id,
+      });
+    },
+    aed === null && revenueUnknown(deps, item.booking_id, item.amount_minor, item.currency, { invoiceId: invoice.id }),
+  );
+}
+
+/** A payment whose AED value could not be worked out (no exchange rate): revenue leaves it out; Tanya is told. */
+export const revenueUnknown = (
+  deps: Pick<WebhookDeps, "sendEmail">,
+  bookingId: string | null,
+  amountMinor: number,
+  currency: string | null,
+  extra: Record<string, unknown> = {},
+): AfterCommit =>
+  async () => {
+    await sendQuietly(deps.sendEmail, "admin_error", adminAddress(), {
+      context: "revenue_aed_unknown",
+      problem: `A payment of ${amountMinor} ${currency ?? ""} on booking ${bookingId} was recorded, but no exchange rate was available, so it is missing from the AED revenue figures. Please note it by hand.`,
+      bookingId,
+      amountMinor,
+      currency,
+      ...extra,
     });
   };
-}
 
 /**
  * A scheduled payment that arrived after the booking stopped being active (cancelled, refunded,

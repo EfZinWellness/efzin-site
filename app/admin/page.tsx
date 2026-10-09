@@ -14,7 +14,7 @@ export default async function AdminUpcomingPage() {
     <>
       <PageTitle sub="Spots, money and missing details for everything still to come.">Upcoming</PageTitle>
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Stat label="Experience revenue (all time)" value={formatAed(revenue.experienceAedMinor)} note="Paid and deposit-paid bookings, gift card and credit included." />
+        <Stat label="Experience revenue (all time)" value={formatAed(revenue.experienceAedMinor)} note="Everything paid on paid and part-paid bookings (every instalment, in AED on the day it was paid), plus money kept on cancellations with nothing given back. Gift card and credit included; refunded and credited bookings left out." />
         <Stat label="Gift card sales (not revenue yet)" value={formatAed(revenue.giftSalesAedMinor)} note="Counted when a card is spent." />
       </div>
 

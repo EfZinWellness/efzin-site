@@ -114,6 +114,8 @@ beforeAll(async () => {
   await booking("b5", "sara", "greece", "deposit_paid", 40000);
   await booking("b6", "noor", "greece", "deposit_paid", 40000);
   await booking("b7", "rana", "greece", "cancelled", 40000);
+  // Cancelled with money back: not revenue (as before).
+  await booking("b8", "rana", "flow", "refunded", 7000);
   await item("b4", 0, -30, 5000, "paid", 1, true);
   await item("b4", 1, 10, 10000, "scheduled"); // due soon
   await item("b4", 2, 45, 20000, "scheduled"); // later than 30 days
@@ -145,13 +147,15 @@ describe("upcoming experiences", () => {
     expect(flow.capacity).toBe(10);
     expect(flow.sold).toBe(3);
     expect(flow.remaining).toBe(6);
-    expect(flow.revenueAedMinor).toBe(25000);
+    // Paid and part-paid bookings, plus a booking cancelled with nothing given back (money kept).
+    expect(flow.revenueAedMinor).toBe(25000 + 9000);
     expect(flow.missingDetails).toBe(1);
   });
 
   it("revenue is booking money only: gift card sales are excluded, gift applied is not added twice", async () => {
     const r = await loadRevenue(db);
-    expect(r.experienceAedMinor).toBe(25000 + 3 * 40000);
+    // Refunded / credited bookings are left out; cancelled ones (nothing back) keep their money.
+    expect(r.experienceAedMinor).toBe(25000 + 9000 + 3 * 40000 + 40000);
     expect(r.giftSalesAedMinor).toBe(80000);
   });
 });
@@ -212,6 +216,8 @@ describe("people", () => {
     expect(r).toHaveLength(1);
     expect(r[0]).toMatchObject({ name: "Layla Haddad", totalSpentAedMinor: 20000 + 40000, bookingCount: 2 });
     expect((await searchPeople(db, "SARA@EXAMPLE")).map((p) => p.name)).toEqual(["Sara Khan"]);
+    // Money kept on cancelled bookings counts as spent; refunded bookings and the count of bookings do not.
+    expect((await searchPeople(db, "rana"))[0]).toMatchObject({ totalSpentAedMinor: 9000 + 40000, bookingCount: 0 });
   });
 
   it("treats LIKE wildcards literally", async () => {

@@ -97,6 +97,7 @@ export async function world(): Promise<World> {
     stripe,
     auth,
     origin: ORIGIN,
+    usdRates: async () => RATES,
     sendEmail: async (kind, to, data) => {
       emails.push({ kind, to, data });
     },

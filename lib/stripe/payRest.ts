@@ -1,15 +1,19 @@
 import type Stripe from "stripe";
 import type { SqlClient } from "../content/sync";
 import { sendQuietly, type SendEmailFn } from "../email/send";
+import { aedValueOf } from "../payments/aed";
 import { adminAddress } from "../requests/handlers";
 import { refId, type StripeApi } from "./client";
 import { sequence, type AfterCommit } from "./events";
+import { revenueUnknown } from "./invoiceEvents";
 import { voidOpenInvoices } from "./invoices";
 
 interface Deps {
   db: SqlClient;
   stripe: StripeApi;
   sendEmail: SendEmailFn;
+  /** USD rates, for the AED value of what was settled (revenue). */
+  usdRates?: () => Promise<Record<string, number>>;
 }
 
 interface Settlement {
@@ -22,6 +26,8 @@ interface Settlement {
   booking_status: string | null;
   settled_item_ids: string[];
   refund_id: string | null;
+  /** First settlement only (not stored): the AED value of what was settled could not be worked out. */
+  aed_unknown?: boolean;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,7 +39,11 @@ function itemIds(md: Stripe.Metadata): string[] | null {
 }
 
 /** Marks the session's items paid (those still unpaid) and records the outcome once per session. */
-async function settle(s: Stripe.Checkout.Session, db: SqlClient): Promise<Settlement> {
+async function settle(
+  s: Stripe.Checkout.Session,
+  db: SqlClient,
+  usdRates?: () => Promise<Record<string, number>>,
+): Promise<Settlement> {
   const prior = await db.query<Settlement>(
     `select booking_id, settled_minor, paid_minor, excess_minor, currency, invoice_ids, booking_status,
             settled_item_ids, refund_id
@@ -51,23 +61,29 @@ async function settle(s: Stripe.Checkout.Session, db: SqlClient): Promise<Settle
   const status = b.rows[0]?.status ?? null;
   const active = status === "deposit_paid" || status === "paid";
 
-  let settled: { id: string; amount_minor: number; stripe_invoice_id: string | null }[] = [];
+  let settled: { id: string; amount_minor: number; stripe_invoice_id: string | null; currency: string }[] = [];
+  let aedUnknown = false;
   if (active) {
-    const r = await db.query<{ id: string; amount_minor: number; stripe_invoice_id: string | null }>(
+    const r = await db.query<{ id: string; amount_minor: number; stripe_invoice_id: string | null; currency: string }>(
       `update payment_schedule_items set status = 'paid', paid_at = now()
         where booking_id = $1 and status in ('scheduled', 'failed') and ($2::uuid[] is null or id = any($2::uuid[]))
-        returning id, amount_minor, stripe_invoice_id`,
+        returning id, amount_minor, stripe_invoice_id, currency`,
       [bookingId, itemIds(md)],
     );
     settled = r.rows;
     const sum = settled.reduce((t, i) => t + i.amount_minor, 0);
+    // Revenue in AED grows with what was settled (exact for AED, today's rate otherwise).
+    const baseCur = settled[0]?.currency ?? b.rows[0]?.base_currency ?? "AED";
+    const aed = await aedValueOf(sum, baseCur, usdRates);
+    aedUnknown = aed === null;
     await db.query(
       `update bookings set amount_paid_base_minor = coalesce(amount_paid_base_minor, 0) + $2,
+              amount_aed_minor = coalesce(amount_aed_minor, 0) + $3,
               status = case when exists (
                 select 1 from payment_schedule_items where booking_id = $1 and status in ('scheduled', 'failed'))
                 then status else 'paid' end
         where id = $1`,
-      [bookingId, sum],
+      [bookingId, sum, aed ?? 0],
     );
   }
   const settledMinor = settled.reduce((t, i) => t + i.amount_minor, 0);
@@ -95,7 +111,7 @@ async function settle(s: Stripe.Checkout.Session, db: SqlClient): Promise<Settle
      values ($1, $2, $3::uuid[], $4, $5, $6, $7, $8::text[], $9, $10)`,
     [s.id, bookingId, settled.map((i) => i.id), settledMinor, paid, excess, currency, row.invoice_ids, status, refId(s.payment_intent)],
   );
-  return row;
+  return { ...row, aed_unknown: aedUnknown };
 }
 
 /**
@@ -110,7 +126,7 @@ async function settle(s: Stripe.Checkout.Session, db: SqlClient): Promise<Settle
  * not settled or the settled sum differs from the session's expected amount.
  */
 export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): Promise<AfterCommit> {
-  const st = await settle(s, deps.db);
+  const st = await settle(s, deps.db, deps.usdRates);
   const pi = refId(s.payment_intent);
   const md = s.metadata ?? {};
   const active = st.booking_status === "deposit_paid" || st.booking_status === "paid";
@@ -134,6 +150,7 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
     expectedMinor: s.metadata?.expected_amount_minor ?? null,
   };
   return sequence(
+    st.aed_unknown === true && revenueUnknown(deps, st.booking_id, st.settled_minor, st.currency, { session: s.id }),
     toRefund &&
       (async () => {
         try {
