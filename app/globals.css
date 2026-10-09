@@ -63,3 +63,24 @@ html { overflow-x: clip; }
 .fade-in { animation: fadein 1.2s ease both; }
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .fade-in { animation: none; } }
+
+/* Admin tables: a normal table from 640px up, stacked cards below it (cells carry data-label). */
+.stack { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.stack th {
+  padding: 0.5rem; text-align: left; font-size: 10px; font-weight: 500;
+  letter-spacing: 0.15em; text-transform: uppercase; border-bottom: 1px solid var(--sand);
+}
+.stack td { padding: 0.5rem; vertical-align: top; border-bottom: 1px solid rgb(217 195 160 / 0.5); }
+@media (max-width: 639px) {
+  .stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .stack, .stack tbody, .stack tr, .stack td { display: block; }
+  .stack tr { margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; border: 1px solid var(--sand); background: rgb(255 255 255 / 0.6); }
+  .stack td { display: flex; justify-content: space-between; gap: 1rem; padding: 0.25rem 0; border: 0; text-align: right; overflow-wrap: anywhere; }
+  .stack td::before {
+    content: attr(data-label); flex: none; text-align: left; color: var(--stone);
+    font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; padding-top: 0.15rem;
+  }
+  .stack td[data-label=""]::before { display: none; }
+  .stack td.lead { display: block; text-align: left; font-weight: 500; }
+  .stack td.lead::before { display: none; }
+}
