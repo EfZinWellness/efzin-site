@@ -19,6 +19,7 @@ import { giftCardDeliveredBuyer } from "./giftCardDeliveredBuyer";
 import { giftCardExpiring } from "./giftCardExpiring";
 import { giftCardUsed } from "./giftCardUsed";
 import { guestAdded } from "./guestAdded";
+import { paymentRefunded } from "./paymentRefunded";
 import { requestReceived } from "./requestReceived";
 import { scheduledPaymentFailed } from "./scheduledPaymentFailed";
 import { scheduledPaymentReceipt } from "./scheduledPaymentReceipt";
@@ -51,4 +52,5 @@ export const TEMPLATES: Record<EmailKind, EmailTemplate> = {
   booking_cancelled_unpaid: bookingCancelledUnpaid,
   booking_cancelled: bookingCancelled,
   booking_transferred: bookingTransferred,
+  payment_refunded: paymentRefunded,
 };

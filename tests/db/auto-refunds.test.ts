@@ -73,6 +73,17 @@ describe("payment on a cancelled booking whose automatic refund failed", () => {
     expect(w.stripe.refundsCreated).toHaveLength(1);
   });
 
+  it("the guest is told about the refund once it goes through on the retry, exactly once", async () => {
+    await failedInvoiceRefund();
+    expect(w.emails.filter((e) => e.kind === "payment_refunded")).toEqual([]);
+    await runDaily(w.db, at("2027-03-10"), deps);
+    const notes = sent.filter((s) => s.kind === "payment_refunded");
+    expect(notes.map((s) => s.to)).toEqual(["layla@email.com"]);
+    expect(notes[0].subject).toBe("We've refunded your payment of €1,920");
+    await runDaily(w.db, at("2027-03-11"), deps);
+    expect(sent.filter((s) => s.kind === "payment_refunded")).toHaveLength(1);
+  });
+
   it("adopts a refund Stripe already made (our metadata) instead of refunding twice", async () => {
     const bookingId = await failedInvoiceRefund();
     w.stripe.existingRefunds.push({
@@ -85,6 +96,67 @@ describe("payment on a cancelled booking whose automatic refund failed", () => {
     await runDaily(w.db, at("2027-03-10"), deps);
     expect(w.stripe.refundsCreated).toEqual([]);
     expect(await refundIdOf("select refund_id as r from invoice_refunds where invoice_id = $1", "in_evt_p")).toBe("re_earlier");
+  });
+});
+
+describe("guest notice of an automatic refund", () => {
+  it("a payment on a cancelled booking refunded at once: the guest gets a short note (ref = refund id)", async () => {
+    const { bookingId, items } = await planBooking(w);
+    await w.db.query("update bookings set status = 'cancelled' where id = $1", [bookingId]);
+    w.stripe.invoicePaymentIntent.in_evt_p = "pi_late";
+    // The real mailer (email_log dedupe), as in production.
+    const calls: { kind: string; to: string; data: Record<string, unknown>; opts: unknown }[] = [];
+    const send = deps.sendEmail;
+    const d = {
+      ...w.deps,
+      sendEmail: async (...a: Parameters<typeof send>) => {
+        calls.push({ kind: a[0], to: a[1], data: a[2], opts: a[4] });
+        return send(...a);
+      },
+    };
+    await handleStripeEvent(invoiceEvent("evt_p", "invoice.paid", items[1].id, bookingId), d);
+    const notes = calls.filter((e) => e.kind === "payment_refunded");
+    expect(notes).toEqual([
+      {
+        kind: "payment_refunded",
+        to: "layla@email.com",
+        data: expect.objectContaining({ name: "Layla Haddad", experience: "Test Retreat", amountMinor: 192000, currency: "EUR", reason: "inactive_invoice" }),
+        opts: { ref: "re_test_1", db: w.db },
+      },
+    ]);
+    expect(sent.filter((s) => s.kind === "payment_refunded")).toHaveLength(1);
+    // The daily job does not send it again.
+    await runDaily(w.db, at("2027-03-10"), deps);
+    expect(sent.filter((s) => s.kind === "payment_refunded")).toHaveLength(1);
+  });
+
+  it("a pay-rest excess refunded at once: the guest is told the amount given back", async () => {
+    const { bookingId, items } = await planBooking(w, "instalments");
+    const booker = (await w.db.query<{ id: string }>("select booker_person_id as id from bookings")).rows[0].id;
+    w.stripe.sessions.length = 0;
+    await startPayRest({ db: w.db, stripe: w.stripe, origin: ORIGIN }, bookingId, booker);
+    const s = w.stripe.sessions[0];
+    await handleStripeEvent(
+      invoiceEvent("evt_inv", "invoice.paid", items[1].id, bookingId, { amount_paid: items[1].amount_minor }),
+      w.deps,
+    );
+    await handleStripeEvent(
+      event("evt_rest", "checkout.session.completed", {
+        object: "checkout.session",
+        id: "cs_rest_1",
+        mode: "payment",
+        payment_status: "paid",
+        metadata: s.metadata,
+        amount_total: s.line_items![0].price_data!.unit_amount,
+        currency: "eur",
+        payment_intent: "pi_rest_1",
+      }),
+      w.deps,
+    );
+    const notes = w.emails.filter((e) => e.kind === "payment_refunded");
+    expect(notes.map((e) => [e.to, e.data.amountMinor, e.data.currency, e.data.reason])).toEqual([
+      ["layla@email.com", items[1].amount_minor, "EUR", "pay_rest_excess"],
+    ]);
   });
 });
 

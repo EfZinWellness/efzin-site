@@ -109,8 +109,10 @@ describe("scheduled payments", () => {
     expect(await item(items[1].id)).toMatchObject({ status: "scheduled", attempts: 0 });
     expect(await bookingStatus(bookingId)).toBe("cancelled");
     expect(w.stripe.refundsCreated).toHaveLength(1);
-    expect(w.emails).toHaveLength(1);
-    expect(w.emails[0].kind).toBe("admin_error");
+    expect(w.emails.map((e) => [e.kind, e.to === "layla@email.com"])).toEqual([
+      ["admin_error", false],
+      ["payment_refunded", true],
+    ]);
     expect(w.emails[0].data.context).toBe("payment_on_inactive_booking_refunded");
   });
 

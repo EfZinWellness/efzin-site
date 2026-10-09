@@ -27,7 +27,8 @@ export type EmailKind =
   | "gift_card_expiring"
   | "booking_cancelled_unpaid"
   | "booking_cancelled"
-  | "booking_transferred";
+  | "booking_transferred"
+  | "payment_refunded";
 
 export interface EmailAttachment {
   filename: string;

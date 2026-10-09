@@ -4,7 +4,7 @@ import { sendQuietly } from "../email/send";
 import { aedValueOf } from "../payments/aed";
 import { balanceDueDate } from "../payments/schedule";
 import { adminAddress } from "../requests/handlers";
-import { refundInactiveInvoiceNow } from "./autoRefunds";
+import { refundInactiveInvoiceNow, sendRefundNotice } from "./autoRefunds";
 import { sequence, type AfterCommit } from "./events";
 import type { WebhookDeps } from "./handlers";
 import { ACTIVE_BOOKING } from "./invoices";
@@ -187,6 +187,7 @@ async function refundInactiveInvoice(invoice: Stripe.Invoice, item: ItemRow, dep
         `A scheduled payment was taken on booking ${item.booking_id} after it was cancelled. It was refunded in full automatically.`,
         { ...facts, refundId },
       )();
+      await sendRefundNotice(db, deps.sendEmail, refundId);
     } catch (err) {
       await alertTanya(
         deps,

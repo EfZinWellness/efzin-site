@@ -1,7 +1,7 @@
 import { cancelBooking } from "../booking/cancel";
 import { dubaiToday } from "../giftcards/dates";
 import { adminAddress } from "../requests/handlers";
-import { pendingAutoRefunds, refundInactiveInvoiceNow, refundPayRestExcessNow } from "../stripe/autoRefunds";
+import { pendingAutoRefunds, refundInactiveInvoiceNow, refundNotices, refundPayRestExcessNow } from "../stripe/autoRefunds";
 import type { StripeApi } from "../stripe/client";
 import { settleCancellation } from "../stripe/refund";
 import { mail, report, type JobContext } from "./context";
@@ -128,6 +128,20 @@ export async function retryAutoRefunds(ctx: JobContext, stripe: StripeApi | null
     }
   }
   return done;
+}
+
+/**
+ * "We've refunded your payment" to the booker for every automatic refund not yet emailed
+ * (email_log ref = refund id): refunds made by the retry above, and notices whose first send
+ * failed. (No time window: the tables hold no refund time, and a refund made late by the retry
+ * must still be announced.) Returns how many were sent.
+ */
+export async function sendAutoRefundNotices(ctx: JobContext): Promise<number> {
+  let n = 0;
+  for (const notice of await refundNotices(ctx.db, {})) {
+    if (await mail(ctx, "payment_refunded", notice.to, notice.data, notice.refundId, { bookingId: notice.data.bookingId })) n++;
+  }
+  return n;
 }
 
 /**

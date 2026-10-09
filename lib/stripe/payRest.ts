@@ -3,7 +3,7 @@ import type { SqlClient } from "../content/sync";
 import { sendQuietly, type SendEmailFn } from "../email/send";
 import { aedValueOf } from "../payments/aed";
 import { adminAddress } from "../requests/handlers";
-import { refundPayRestExcessNow } from "./autoRefunds";
+import { refundPayRestExcessNow, sendRefundNotice } from "./autoRefunds";
 import { refId, type StripeApi } from "./client";
 import { sequence, type AfterCommit } from "./events";
 import { revenueUnknown } from "./invoiceEvents";
@@ -140,6 +140,7 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
     ((listed !== null && listed.some((id) => !settledIds.has(id))) || (expected !== null && expected !== st.settled_minor));
   const toRefund = st.excess_minor > 0 && pi !== null && st.refund_id === null;
   let refundFailed: string | null = null;
+  let refundId: string | null = null;
   const details = {
     bookingId: st.booking_id,
     bookingStatus: st.booking_status,
@@ -155,7 +156,7 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
     toRefund &&
       (async () => {
         try {
-          await refundPayRestExcessNow(deps.db, deps.stripe, {
+          refundId = await refundPayRestExcessNow(deps.db, deps.stripe, {
             session_id: s.id,
             booking_id: st.booking_id,
             payment_intent: pi!,
@@ -194,5 +195,7 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
           refundedMinor: refunded ? st.excess_minor : 0,
         });
       }),
+    // The guest is told what came back (once per refund; the daily job retries a failed notice).
+    () => (refundId !== null ? sendRefundNotice(deps.db, deps.sendEmail, refundId) : Promise.resolve()),
   );
 }
