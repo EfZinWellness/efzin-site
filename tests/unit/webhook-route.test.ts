@@ -9,15 +9,16 @@ const signed = () => stripe.webhooks.generateTestHeaderString({ payload, secret:
 const verify = (body: string, sig: string, secret: string) => stripe.webhooks.constructEvent(body, sig, secret);
 
 function deps(handle: (evt: Stripe.Event) => Promise<unknown>) {
-  const sent: { kind: string; data: Record<string, unknown> }[] = [];
+  const sent: { kind: string; data: Record<string, unknown>; ref?: string }[] = [];
   return {
     sent,
     d: {
       secret: SECRET,
       verify,
       handle,
-      sendEmail: async (kind: string, _to: string, data: Record<string, unknown>) => {
-        sent.push({ kind, data });
+      now: () => new Date("2027-01-10T09:15:00Z"),
+      sendEmail: async (kind: string, _to: string, data: Record<string, unknown>, _a?: unknown, opts?: { ref?: string }) => {
+        sent.push({ kind, data, ref: opts?.ref });
       },
     },
   };
@@ -47,6 +48,8 @@ describe("processWebhook", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].kind).toBe("admin_error");
     expect(sent[0].data).toMatchObject({ eventId: "evt_1", eventType: "invoice.paid", error: "db down" });
+    // Through reportError: at most one alert per hour (email_log ref), not one per Stripe retry.
+    expect(sent[0].ref).toBe("stripe_webhook@2027-01-10T09");
   });
 
   it("answers 503 when no webhook secret is configured", async () => {
