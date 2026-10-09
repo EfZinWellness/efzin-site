@@ -75,7 +75,7 @@ function addDays(ymd: string, days: number): string {
 }
 
 /** Add whole months, keeping the day-of-month clamped to the target month's last day. */
-function addMonthsClamped(ymd: string, months: number): string {
+export function addMonthsClamped(ymd: string, months: number): string {
   const [y, m, d] = parse(ymd);
   const idx = y * 12 + (m - 1) + months;
   const ny = Math.floor(idx / 12);

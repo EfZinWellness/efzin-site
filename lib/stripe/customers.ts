@@ -17,6 +17,10 @@ export async function ensureStripeCustomer(db: SqlClient, stripe: StripeApi, per
       email: person.email,
       ...(person.phone ? { phone: person.phone } : {}),
       metadata: { person_id: personId },
+      // Staging only: attach new customers to a Stripe test clock (scripts/stripe-test-clock.ts).
+      ...(process.env.STRIPE_TEST_CLOCK_ID && process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_")
+        ? { test_clock: process.env.STRIPE_TEST_CLOCK_ID }
+        : {}),
     },
     // A retried request for the same person reuses the same customer.
     { idempotencyKey: `efzin-person-${personId}` },
