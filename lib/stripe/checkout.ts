@@ -74,6 +74,8 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
     const metadata = { kind: "booking", pending_booking_id: id };
     const currency = payload.baseCurrency.toLowerCase();
     const common = {
+      // Card only (Apple Pay / Google Pay included): no delayed methods that settle days later.
+      payment_method_types: ["card" as const],
       client_reference_id: id,
       expires_at: Math.floor(expiresAt.getTime() / 1000),
       metadata,

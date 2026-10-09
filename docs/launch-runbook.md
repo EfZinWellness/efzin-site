@@ -107,6 +107,8 @@ Claude does these with the staging connection details. (Production repeats them 
   - `invoice.overdue`
   - `charge.refunded`
 
+  Card only (incl. Apple Pay / Google Pay); bank transfers and pay-later methods are switched off in code.
+
   Copy the signing secret into `STRIPE_WEBHOOK_SECRET` in Vercel for that environment.
 - [ ] **[Tanya]** Settings > Payments > **Adaptive Pricing: ON** (guests see prices in their own currency). Already done for test mode; do it again in live mode.
 - [ ] **[Both]** **Check Adaptive Pricing really works** alongside the saved card for payment plans: in F2, book a payment-plan retreat from a UK/EU-looking browser and confirm Checkout shows the deposit in GBP/EUR. If it only shows AED, the deposit is simply charged in AED; later instalments are still charged in the guest's currency. Tell Claude either way.

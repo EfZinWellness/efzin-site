@@ -46,6 +46,7 @@ describe("startPayRest", () => {
     expect(w.stripe.sessions).toHaveLength(1);
     const s = w.stripe.sessions[0];
     expect(s.mode).toBe("payment");
+    expect(s.payment_method_types).toEqual(["card"]);
     expect(s.customer).toBe("cus_test_1");
     const unpaidIds = (
       await w.db.query<{ id: string }>(

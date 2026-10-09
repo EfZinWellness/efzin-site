@@ -73,6 +73,8 @@ export async function startPayRest(deps: SelfServeDeps, bookingId: string, perso
   const session = await stripe.checkout.sessions.create(
     {
       mode: "payment",
+      // Card only (Apple Pay / Google Pay included): no delayed methods that settle days later.
+      payment_method_types: ["card"],
       customer,
       client_reference_id: bookingId,
       expires_at: expiresAt,
