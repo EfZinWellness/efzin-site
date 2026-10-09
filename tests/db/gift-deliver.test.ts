@@ -105,7 +105,7 @@ describe("startGiftCheckout", () => {
     const s = stripe.sessions[0];
     expect(s.mode).toBe("payment");
     expect(s.adaptive_pricing).toEqual({ enabled: true });
-    expect(s.payment_method_types).toEqual(["card"]);
+    expect(s.allowed_payment_method_types).toEqual(["card"]);
     expect(s.customer_email).toBe("layla@example.com");
     expect(s.line_items).toEqual([
       expect.objectContaining({

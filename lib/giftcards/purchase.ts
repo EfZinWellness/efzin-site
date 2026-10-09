@@ -159,7 +159,7 @@ export async function startGiftCheckout(input: GiftPurchase, deps: GiftCheckoutD
       {
         mode: "payment",
         // Card only (Apple Pay / Google Pay included): no delayed methods that settle days later.
-        payment_method_types: ["card"],
+        allowed_payment_method_types: ["card"],
         adaptive_pricing: { enabled: true },
         customer_email: input.buyerEmail,
         client_reference_id: batchId,

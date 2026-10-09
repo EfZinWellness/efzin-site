@@ -146,7 +146,7 @@ describe("startCheckout", () => {
     expect(s.expires_at).toBe(Math.floor(holdExpiry / 1000));
     expect(s.adaptive_pricing).toEqual({ enabled: true });
     // Card only (Apple Pay / Google Pay included): no delayed payment methods.
-    expect(s.payment_method_types).toEqual(["card"]);
+    expect(s.allowed_payment_method_types).toEqual(["card"]);
     expect(s.line_items?.[0].price_data?.unit_amount).toBe(28000 * 2 + 15000);
     expect(s.line_items?.[0].price_data?.currency).toBe("aed");
     expect(s.line_items?.[0].price_data?.product_data?.name).toBe("Test Event — Pay in full");
@@ -207,7 +207,7 @@ describe("startCheckout", () => {
     expect(out.kind).toBe("redirect");
     const s = stripe.sessions[0];
     expect(s.mode).toBe("setup");
-    expect(s.payment_method_types).toEqual(["card"]);
+    expect(s.allowed_payment_method_types).toEqual(["card"]);
     expect(s.customer).toBe("cus_test_1");
     expect(s.line_items).toBeUndefined();
     expect(s.metadata?.kind).toBe("booking");
