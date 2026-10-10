@@ -385,6 +385,37 @@ describe("daily job: unpaid at the balance due date", () => {
     expect(guestMail.text).toContain(c[0].code);
   });
 
+  it("guest-side unpaid cancellation of an event, policy unchanged: 52h out refunds (minus fee), 28h out turns into credit", async () => {
+    const seed = (email: string, customer: string, invoice: string, due: string) =>
+      seedBooking(w.db, {
+        slug: "test-event",
+        status: "deposit_paid",
+        booker: { name: "Eve E", email, customer },
+        items: [
+          { seq: 0, dueOn: "2027-01-10", amount: 5600, status: "paid" },
+          { seq: 1, dueOn: due, amount: 22400, status: "failed", invoice },
+        ],
+      });
+    // Cancellable from 2027-01-30 (due 01-28 + 2 days); the event starts 2027-02-01 10:00 Dubai.
+    const far = await seed("far@x.com", "cus_far", "in_far", "2027-01-28");
+    await w.db.query("update bookings set stripe_payment_intent = 'pi_far' where id = $1", [far.bookingId]);
+    w.stripe.invoiceStatus.in_far = "open";
+    w.stripe.addCharge({ id: "ch_far", paymentIntent: "pi_far", amount: 5600, currency: "aed", fee: 400, created: 1 });
+    // 2027-01-30 06:00 Dubai: 52 hours before the start.
+    await runDaily(w.db, at("2027-01-30"), deps);
+    expect(await status("bookings", far.bookingId)).toBe("refunded");
+    expect(w.stripe.refundsCreated.map((r) => [r.params.charge, r.params.amount])).toEqual([["ch_far", 5200]]);
+
+    const near = await seed("near@x.com", "cus_near", "in_near", "2027-01-29");
+    w.stripe.invoiceStatus.in_near = "open";
+    // 2027-01-31 06:00 Dubai: 28 hours before the start.
+    await runDaily(w.db, at("2027-01-31"), deps);
+    expect(await status("bookings", near.bookingId)).toBe("credited");
+    const credits = (await w.db.query<{ amount_aed_minor: number; source_booking_id: string }>("select amount_aed_minor, source_booking_id from credits")).rows;
+    expect(credits).toEqual([{ amount_aed_minor: 5600, source_booking_id: near.bookingId }]);
+    expect(w.stripe.refundsCreated).toHaveLength(1);
+  });
+
   it("a cancellation notice that failed to send is sent on the next run, exactly once", async () => {
     const b = await attemptedAndFailed();
     fail(true);
