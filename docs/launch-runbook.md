@@ -113,6 +113,7 @@ Claude does these with the staging connection details. (Production repeats them 
   Card only (incl. Apple Pay / Google Pay); bank transfers and pay-later methods are switched off in code.
 
   Copy the signing secret into `STRIPE_WEBHOOK_SECRET` in Vercel for that environment.
+- [ ] **[Tanya]** Settings > Payments > **Payment methods → Apple Pay and Google Pay ON** (Apple Pay domain verification is automatic for Stripe Checkout). Checkout shows them first on devices that support them. Booking and gift Checkouts also offer "save my card" and show a returning guest's saved cards; payment plans save the card automatically.
 - [ ] **[Tanya]** Settings > Payments > **Adaptive Pricing: ON** (guests see prices in their own currency). Already done for test mode; do it again in live mode.
 - [ ] **[Both]** **Check Adaptive Pricing really works** alongside the saved card for payment plans: in F2, book a payment-plan retreat from a UK/EU-looking browser and confirm Checkout shows the deposit in GBP/EUR. If it only shows AED, the deposit is simply charged in AED; later instalments are still charged in the guest's currency. Tell Claude either way.
 - [ ] **[Tanya]** Settings > Billing > Invoices (and Customer emails): switch **on** "Email finalised invoices and credit notes to customers" / "Send invoice emails". This is how guests without a saved card get a pay link.

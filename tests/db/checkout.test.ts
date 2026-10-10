@@ -150,7 +150,12 @@ describe("startCheckout", () => {
     expect(s.line_items?.[0].price_data?.unit_amount).toBe(28000 * 2 + 15000);
     expect(s.line_items?.[0].price_data?.currency).toBe("aed");
     expect(s.line_items?.[0].price_data?.product_data?.name).toBe("Test Event — Pay in full");
-    expect(s.customer).toBeUndefined();
+    // Pay in full: always a Stripe customer, the guest may tick "save my card" (wallets stay
+    // available: they are card-based); no off-session saving without that choice.
+    expect(s.customer).toBe("cus_test_1");
+    expect(s.customer_email).toBeUndefined();
+    expect(s.saved_payment_method_options).toEqual({ payment_method_save: "enabled", allow_redisplay_filters: ["always", "limited"] });
+    expect(s.payment_intent_data?.setup_future_usage).toBeUndefined();
     const pending = await db.query<{ id: string; kind: string; checkout_session_id: string; hold_ids: string[] }>(
       "select id, kind, checkout_session_id, hold_ids from pending_bookings",
     );
@@ -186,6 +191,9 @@ describe("startCheckout", () => {
     expect(s.line_items?.[0].price_data?.currency).toBe("eur");
     expect(s.payment_intent_data?.setup_future_usage).toBe("off_session");
     expect(s.customer).toBe("cus_test_1");
+    // A plan saves the card automatically (no save checkbox); saved cards are offered to returning guests.
+    expect(s.saved_payment_method_options).toEqual({ allow_redisplay_filters: ["always", "limited"] });
+    expect(s.allowed_payment_method_types).toEqual(["card"]);
     const p = await db.query<{ stripe_customer_id: string }>(
       "select stripe_customer_id from people where email = 'layla@email.com'",
     );

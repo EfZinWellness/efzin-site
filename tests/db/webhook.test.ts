@@ -80,6 +80,14 @@ describe("checkout.session.completed (booking)", () => {
     expect(w.emails).toHaveLength(4); // confirmation, guest added, gift card used, Tanya's note
   });
 
+  it("pay in full with a customer attached: the card is not made the default (the guest only chose whether to save it)", async () => {
+    const { pendingId, sessionId } = await checkout(w, EVENT, { lines: [{ ticketKey: "whole", qty: 1 }] });
+    expect(w.stripe.sessions[0].customer).toBe("cus_test_1");
+    await handleStripeEvent(completedBooking("evt_full", pendingId, sessionId, { customer: "cus_test_1" }), w.deps);
+    expect(await count(w.db, "select * from bookings where status = 'paid'")).toBe(1);
+    expect(w.stripe.customerUpdates).toEqual([]);
+  });
+
   it("saves the SetupIntent card as the customer default in setup mode", async () => {
     const code = await giftCard(w.db, 200000);
     const { pendingId, sessionId } = await checkout(w, RETREAT, {

@@ -28,7 +28,16 @@ export interface CheckoutDeps {
   effects?: ConfirmEffects;
 }
 
-export type CheckoutResult = { kind: "redirect"; url: string } | { kind: "confirmed"; bookingId: string };
+/**
+ * Which of the customer's saved cards Checkout offers: those saved with the guest's "save my
+ * card" tick ('always') and those saved for a payment plan ('limited').
+ */
+export const SAVED_CARD_FILTERS: Stripe.Checkout.SessionCreateParams.SavedPaymentMethodOptions.AllowRedisplayFilter[] = [
+  "always",
+  "limited",
+];
+
+export type CheckoutResult ={ kind: "redirect"; url: string } | { kind: "confirmed"; bookingId: string };
 
 /**
  * True only when Stripe definitely did not create the session: a 4xx answer. Network errors,
@@ -65,8 +74,10 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
     if (firstAmount === 0 && laterAmount === 0) {
       return { kind: "confirmed", bookingId: await confirmPendingBooking(db, id, null, deps.effects) };
     }
+    // A plan (or setup mode) saves the card for later charges; pay in full offers the guest a
+    // "save my card" choice. Either way the booker's Stripe customer is attached.
     const savesCard = payload.option !== "full" || firstAmount === 0;
-    const customer = savesCard ? await ensureStripeCustomer(db, stripe, payload.booker.personId) : undefined;
+    const customer = await ensureStripeCustomer(db, stripe, payload.booker.personId);
     const callAtMs = deps.now.getTime() + (Date.now() - startedMs);
     const expiresAt = new Date(callAtMs + HOLD_MINUTES * 60_000);
     await extendPendingExpiry(db, id, expiresAt);
@@ -74,7 +85,9 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
     const metadata = { kind: "booking", pending_booking_id: id };
     const currency = payload.baseCurrency.toLowerCase();
     const common = {
-      // Card only (Apple Pay / Google Pay included): no delayed methods that settle days later.
+      // Card only: no delayed methods that settle days later. Apple Pay / Google Pay are card
+      // wallets (PaymentMethod.card.wallet), not separate types, so Checkout still shows them
+      // first where the device supports them.
       // (API 2026-09-30 replaced payment_method_types with this filter.)
       allowed_payment_method_types: ["card" as const],
       client_reference_id: id,
@@ -101,10 +114,16 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
                 },
               },
             ],
-            ...(customer ? { customer } : { customer_email: payload.booker.email }),
+            customer,
+            // Plans save the card off-session automatically (Stripe does not allow the save
+            // checkbox together with setup_future_usage); pay in full offers the checkbox.
+            // Returning guests see their saved cards, including ones saved by a plan ('limited').
+            saved_payment_method_options: savesCard
+              ? { allow_redisplay_filters: SAVED_CARD_FILTERS }
+              : { payment_method_save: "enabled", allow_redisplay_filters: SAVED_CARD_FILTERS },
             payment_intent_data: {
               metadata,
-              ...(payload.option !== "full" ? { setup_future_usage: "off_session" as const } : {}),
+              ...(savesCard ? { setup_future_usage: "off_session" as const } : {}),
             },
           };
   } catch (err) {

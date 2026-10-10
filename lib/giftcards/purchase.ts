@@ -3,8 +3,9 @@ import type { SqlClient } from "../content/sync";
 import type { EmailKind } from "../email/send";
 import { upsertPersonByEmail } from "../people/upsert";
 import { adminAddress } from "../requests/handlers";
-import { definitelyRejected } from "../stripe/checkout";
+import { definitelyRejected, SAVED_CARD_FILTERS } from "../stripe/checkout";
 import type { StripeApi } from "../stripe/client";
+import { ensureStripeCustomer } from "../stripe/customers";
 import { addMonthsYmd, dubaiToday, isValidYmd } from "./dates";
 import { issueGiftCards } from "./db";
 
@@ -115,6 +116,9 @@ export interface GiftCheckoutDeps {
 export async function startGiftCheckout(input: GiftPurchase, deps: GiftCheckoutDeps): Promise<{ url: string }> {
   const { db, stripe } = deps;
   const buyerPersonId = await upsertPersonByEmail(db, { name: input.buyerName, email: input.buyerEmail });
+  // The buyer's Stripe customer, so Checkout can offer to save the card (and show saved ones).
+  // Made before any card is issued: a failure here leaves nothing behind.
+  const customer = await ensureStripeCustomer(db, stripe, buyerPersonId);
   const suggested = input.suggestedSlug
     ? (await db.query<{ id: string }>("select id from experiences where slug = $1", [input.suggestedSlug])).rows[0]
     : undefined;
@@ -158,10 +162,12 @@ export async function startGiftCheckout(input: GiftPurchase, deps: GiftCheckoutD
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
-        // Card only (Apple Pay / Google Pay included): no delayed methods that settle days later.
+        // Card only (Apple Pay / Google Pay are card wallets, so included): no delayed methods
+        // that settle days later.
         allowed_payment_method_types: ["card"],
         adaptive_pricing: { enabled: true },
-        customer_email: input.buyerEmail,
+        customer,
+        saved_payment_method_options: { payment_method_save: "enabled", allow_redisplay_filters: SAVED_CARD_FILTERS },
         client_reference_id: batchId,
         allow_promotion_codes: false,
         line_items: [

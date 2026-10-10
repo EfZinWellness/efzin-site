@@ -106,7 +106,12 @@ describe("startGiftCheckout", () => {
     expect(s.mode).toBe("payment");
     expect(s.adaptive_pricing).toEqual({ enabled: true });
     expect(s.allowed_payment_method_types).toEqual(["card"]);
-    expect(s.customer_email).toBe("layla@example.com");
+    // The buyer's Stripe customer is attached so they can save their card (wallets included).
+    expect(s.customer).toBe("cus_test_1");
+    expect(s.customer_email).toBeUndefined();
+    expect(stripe.customersCreated).toEqual([expect.objectContaining({ email: "layla@example.com" })]);
+    expect(s.saved_payment_method_options).toEqual({ payment_method_save: "enabled", allow_redisplay_filters: ["always", "limited"] });
+    expect(s.payment_intent_data).toEqual({ metadata: s.metadata });
     expect(s.line_items).toEqual([
       expect.objectContaining({
         quantity: 1,

@@ -84,14 +84,23 @@ async function completeBooking(s: Stripe.Checkout.Session, pendingId: string | u
         }
       : null;
   const outcome = await confirmPendingInTx(deps.db, pendingId, payment);
-  const customer = refId(s.customer);
+  // Every session has the booker's customer, but only a plan (or setup mode) saves the card for
+  // later charges; a pay-in-full guest only chose whether to keep it for next time.
+  const customer = (await savesCardForPlan(deps.db, s, pendingId)) ? refId(s.customer) : null;
   // Emails first (they never throw): if saving the card fails, the retry finds the booking
   // already confirmed and only redoes the card step.
   return sequence(
-    // Without a customer on the session no card is saved, so instalments go out as pay links.
+    // Without a saved plan card, any later instalment goes out as a pay link.
     outcome.created && (() => afterBookingConfirmed(deps.db, outcome, { ...deps, payByLink: !customer })),
     customer ? () => saveSessionCard(deps.stripe, s, customer).then(() => {}) : null,
   );
+}
+
+/** Setup mode, or a payment-mode session for a payment plan (setup_future_usage off_session). */
+async function savesCardForPlan(db: WebhookDeps["db"], s: Stripe.Checkout.Session, pendingId: string): Promise<boolean> {
+  if (s.mode === "setup") return true;
+  const r = await db.query<{ option: string | null }>("select payload->>'option' as option from pending_bookings where id = $1", [pendingId]);
+  return (r.rows[0]?.option ?? "full") !== "full";
 }
 
 /** Makes the card from this session the customer's default, for scheduled payments. */
