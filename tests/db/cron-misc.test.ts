@@ -71,6 +71,13 @@ describe("reportError", () => {
     fail(true);
     await expect(reportError(new Error("x"), "new_context", opts(at))).resolves.toBeUndefined();
   });
+
+  it("still emails Tanya (without dedupe) when the email_log claim itself fails", async () => {
+    const broken = { query: async () => Promise.reject(new Error("db down")) };
+    await reportError(new Error("boom"), "daily_charge", { db: broken, now: new Date("2027-01-10T09:05:00Z"), sendEmail: send });
+    expect(kinds(sent)).toEqual([`admin_error>${ADMIN}`]);
+    expect(sent[0].text).toContain("boom");
+  });
 });
 
 describe("hourly job", () => {

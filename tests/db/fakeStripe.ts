@@ -280,18 +280,36 @@ export class FakeStripe implements StripeApi {
   refundIdempotency = new Map<string, { params: string; result: { id: string } }>();
 
   /** Refunds Stripe already has (from the dashboard or an earlier run), listed by refunds.list. */
-  existingRefunds: { id: string; charge: string; amount: number; status: string; metadata: Record<string, string> }[] = [];
+  existingRefunds: {
+    id: string;
+    charge: string;
+    /** When set, refunds.list by payment_intent only returns it for that payment intent. */
+    payment_intent?: string;
+    amount: number;
+    status: string;
+    metadata: Record<string, string>;
+    /** Unix seconds (default 0). */
+    created?: number;
+  }[] = [];
 
   refunds = {
     list: async (params: Stripe.RefundListParams) => {
       const made = this.refundsCreated.map((r, i) => ({
         id: `re_test_${i + 1}`,
         charge: r.params.charge ?? null,
+        payment_intent: r.params.payment_intent,
+        amount: r.params.amount ?? 0,
         status: "succeeded",
         metadata: (r.params.metadata ?? {}) as Record<string, string>,
+        created: Math.floor(Date.now() / 1000),
       }));
-      const all = [...this.existingRefunds, ...made].filter((r) => !params.charge || r.charge === params.charge);
-      return { data: all.map(({ id, status, metadata }) => ({ id, status, metadata })), has_more: false };
+      const all = [...this.existingRefunds, ...made]
+        .filter((r) => !params.charge || r.charge === params.charge)
+        .filter((r) => !params.payment_intent || r.payment_intent === undefined || r.payment_intent === params.payment_intent);
+      return {
+        data: all.map(({ id, status, metadata, amount, created }) => ({ id, status, metadata, amount, created: created ?? 0 })),
+        has_more: false,
+      };
     },
     create: async (params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions) => {
       if (this.refundError) {

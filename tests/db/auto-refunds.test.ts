@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadUnrefunded } from "../../lib/admin/payments";
+import { loadUnrefunded, markRefundedByHand } from "../../lib/admin/payments";
 import { runDaily, type DailyDeps } from "../../lib/cron/daily";
 import { handleStripeEvent } from "../../lib/stripe/handlers";
 import { startPayRest } from "../../lib/stripe/selfServe";
@@ -8,6 +8,9 @@ import { ORIGIN, event, invoiceEvent, planBooking, world, type World } from "./w
 
 /** 06:00 in Dubai on the given date (the daily cron's time). */
 const at = (ymd: string) => new Date(`${ymd}T02:00:00Z`);
+/** When the payment needing a refund was seen (the day before the first daily run). */
+const SEEN = "2027-03-09T10:00:00Z";
+const SEEN_S = Date.parse(SEEN) / 1000;
 
 let w: World;
 let sent: Captured[];
@@ -38,6 +41,8 @@ describe("payment on a cancelled booking whose automatic refund failed", () => {
     await handleStripeEvent(invoiceEvent("evt_p", "invoice.paid", items[1].id, bookingId), w.deps);
     expect(w.stripe.refundsCreated).toEqual([]);
     expect(await refundIdOf("select refund_id as r from invoice_refunds where invoice_id = $1", "in_evt_p")).toBeNull();
+    // Seen the day before the daily runs below.
+    await w.db.query("update invoice_refunds set created_at = $1", [SEEN]);
     return bookingId;
   }
 
@@ -82,6 +87,22 @@ describe("payment on a cancelled booking whose automatic refund failed", () => {
     expect(notes[0].subject).toBe("We've refunded your payment of €1,920");
     await runDaily(w.db, at("2027-03-11"), deps);
     expect(sent.filter((s) => s.kind === "payment_refunded")).toHaveLength(1);
+  });
+
+  it("adopts a dashboard refund of the same amount made after the payment (no metadata) instead of refunding twice", async () => {
+    await failedInvoiceRefund();
+    w.stripe.existingRefunds.push({
+      id: "re_by_hand",
+      charge: "ch_late",
+      payment_intent: "pi_late",
+      amount: 192000,
+      status: "succeeded",
+      metadata: {},
+      created: SEEN_S + 600,
+    });
+    await runDaily(w.db, at("2027-03-10"), deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect(await refundIdOf("select refund_id as r from invoice_refunds where invoice_id = $1", "in_evt_p")).toBe("re_by_hand");
   });
 
   it("adopts a refund Stripe already made (our metadata) instead of refunding twice", async () => {
@@ -184,8 +205,69 @@ describe("pay-rest excess whose automatic refund failed", () => {
     w.stripe.refundError = Object.assign(new Error("stripe down"), { statusCode: 500 });
     await handleStripeEvent(evt, w.deps);
     expect(w.stripe.refundsCreated).toEqual([]);
+    expect(w.emails.find((e) => e.kind === "admin_error" && e.data.context === "pay_rest_refund_failed")?.data.problem).toContain(
+      "We'll retry automatically each morning. If you refund it yourself in Stripe, press 'Mark refunded by hand' here.",
+    );
+    // Seen the day before the daily runs below.
+    await w.db.query("update pay_rest_settlements set created_at = $1", [SEEN]);
     return { bookingId, excess: items[1].amount_minor };
   }
+
+  it("a refund made by hand in the Stripe dashboard (no metadata, same amount, after the payment) is adopted, not repeated", async () => {
+    const { excess } = await failedExcessRefund();
+    w.stripe.existingRefunds.push(
+      // Older than the payment: not ours to adopt.
+      { id: "re_old", charge: "ch_rest", payment_intent: "pi_rest_1", amount: excess, status: "succeeded", metadata: {}, created: SEEN_S - 86_400 },
+      { id: "re_failed", charge: "ch_rest", payment_intent: "pi_rest_1", amount: excess, status: "failed", metadata: {}, created: SEEN_S + 60 },
+      { id: "re_dashboard", charge: "ch_rest", payment_intent: "pi_rest_1", amount: excess, status: "succeeded", metadata: {}, created: SEEN_S + 3600 },
+    );
+    await runDaily(w.db, at("2027-03-10"), deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect(await refundIdOf("select refund_id as r from pay_rest_settlements where session_id = $1", "cs_rest_1")).toBe("re_dashboard");
+    expect(await loadUnrefunded(w.db)).toEqual([]);
+  });
+
+  it("when the charge already shows at least the excess refunded, nothing is refunded: a marker is stored and Tanya alerted", async () => {
+    const { excess } = await failedExcessRefund();
+    w.stripe.addCharge({ id: "ch_rest", paymentIntent: "pi_rest_1", amount: excess * 3, currency: "eur", fee: 100, created: SEEN_S, amountRefunded: excess });
+    await runDaily(w.db, at("2027-03-10"), deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect(await refundIdOf("select refund_id as r from pay_rest_settlements where session_id = $1", "cs_rest_1")).toMatch(/^already_refunded:/);
+    const alerts = sent.filter((s) => s.kind === "admin_error" && s.text.includes("already"));
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].text).toContain("cs_rest_1");
+    // No "we've refunded" note to the guest for a refund the site did not make.
+    expect(sent.filter((s) => s.kind === "payment_refunded")).toEqual([]);
+    expect(await loadUnrefunded(w.db)).toEqual([]);
+    await runDaily(w.db, at("2027-03-11"), deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+  });
+
+  it("'Mark refunded by hand' stops the retries and takes it off the list", async () => {
+    await failedExcessRefund();
+    expect(await markRefundedByHand(w.db, "pay_rest_excess", "cs_rest_1", new Date("2027-03-09T12:00:00Z"))).toBe(true);
+    expect(await refundIdOf("select refund_id as r from pay_rest_settlements where session_id = $1", "cs_rest_1")).toBe(
+      "manual:2027-03-09T12:00:00.000Z",
+    );
+    expect(await markRefundedByHand(w.db, "pay_rest_excess", "cs_rest_1", new Date())).toBe(false);
+    await runDaily(w.db, at("2027-03-10"), deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect(await loadUnrefunded(w.db)).toEqual([]);
+    expect(sent.filter((s) => s.kind === "payment_refunded")).toEqual([]);
+  });
+
+  it("retries stop 30 days after the payment was seen: Tanya is alerted once, the row stays listed", async () => {
+    await failedExcessRefund();
+    await runDaily(w.db, at("2027-04-09"), deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    const gaveUp = () => sent.filter((s) => s.kind === "admin_error" && s.text.includes("30 days"));
+    expect(gaveUp()).toHaveLength(1);
+    expect(gaveUp()[0].text).toContain("cs_rest_1");
+    await runDaily(w.db, at("2027-04-10"), deps);
+    expect(w.stripe.refundsCreated).toEqual([]);
+    expect(gaveUp()).toHaveLength(1);
+    expect(await loadUnrefunded(w.db)).toHaveLength(1);
+  });
 
   it("is listed, then retried by the daily job once, with metadata for adoption", async () => {
     const { bookingId, excess } = await failedExcessRefund();

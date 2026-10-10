@@ -15,7 +15,8 @@ const message = (err: unknown): string => (err instanceof Error ? err.message : 
 
 /**
  * Logs an error and emails Tanya (`admin_error`) at most once per `context` per hour: the email
- * is deduplicated in email_log with ref `context@YYYY-MM-DDTHH` (UTC hour). Never throws.
+ * is deduplicated in email_log with ref `context@YYYY-MM-DDTHH` (UTC hour); when that claim
+ * fails the email is sent without dedupe. Never throws.
  */
 export async function reportError(err: unknown, context: string, opts: ReportOptions = {}): Promise<void> {
   console.error(`[error] ${context}`, err);
@@ -27,7 +28,8 @@ export async function reportError(err: unknown, context: string, opts: ReportOpt
       adminAddress(),
       { context, problem: `Error in ${context.replace(/_/g, " ")}.`, error: message(err), at: now.toISOString(), ...opts.extra },
       undefined,
-      { ref: `${context}@${hour}`, ...(opts.db !== undefined ? { db: opts.db } : {}) },
+      // If the dedupe claim fails (e.g. the database is what broke), the report still goes out.
+      { ref: `${context}@${hour}`, sendIfClaimFails: true, ...(opts.db !== undefined ? { db: opts.db } : {}) },
     );
   } catch (mailErr) {
     console.error(`[error] could not email the report for ${context}`, mailErr);

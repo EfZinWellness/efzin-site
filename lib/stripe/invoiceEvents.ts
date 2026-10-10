@@ -4,7 +4,7 @@ import { sendQuietly } from "../email/send";
 import { aedValueOf } from "../payments/aed";
 import { balanceDueDate } from "../payments/schedule";
 import { adminAddress } from "../requests/handlers";
-import { refundInactiveInvoiceNow, sendRefundNotice } from "./autoRefunds";
+import { refundInactiveInvoiceNow, RETRY_COPY, sendRefundNotice } from "./autoRefunds";
 import { sequence, type AfterCommit } from "./events";
 import type { WebhookDeps } from "./handlers";
 import { ACTIVE_BOOKING } from "./invoices";
@@ -176,23 +176,32 @@ async function refundInactiveInvoice(invoice: Stripe.Invoice, item: ItemRow, dep
   };
   return async () => {
     try {
-      const refundId = await refundInactiveInvoiceNow(db, deps.stripe, {
+      const out = await refundInactiveInvoiceNow(db, deps.stripe, {
         invoice_id: invoice.id,
         booking_id: item.booking_id,
         amount_minor: invoice.amount_paid,
       });
+      if (out.outcome === "already_refunded") {
+        await alertTanya(
+          deps,
+          "payment_on_inactive_booking_already_refunded",
+          `A scheduled payment was taken on booking ${item.booking_id} after it was cancelled, but Stripe already shows at least that amount refunded on the payment. Nothing was refunded again; please check the payment in Stripe.`,
+          facts,
+        )();
+        return;
+      }
       await alertTanya(
         deps,
         "payment_on_inactive_booking_refunded",
         `A scheduled payment was taken on booking ${item.booking_id} after it was cancelled. It was refunded in full automatically.`,
-        { ...facts, refundId },
+        { ...facts, refundId: out.id },
       )();
-      await sendRefundNotice(db, deps.sendEmail, refundId);
+      await sendRefundNotice(db, deps.sendEmail, out.id);
     } catch (err) {
       await alertTanya(
         deps,
         "payment_on_inactive_booking_refund_failed",
-        `Payment received on cancelled booking ${item.booking_id}; the automatic refund failed. The daily job retries it, and it is listed on the admin Payments page until it goes through; refund it by hand if it stays there.`,
+        `Payment received on cancelled booking ${item.booking_id}; the automatic refund failed. It is listed on the admin Payments page. ${RETRY_COPY}`,
         { ...facts, error: err instanceof Error ? err.message : String(err) },
       )();
     }

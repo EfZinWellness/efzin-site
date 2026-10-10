@@ -69,7 +69,8 @@ export interface UnrefundedPayment {
 /**
  * Money the site should have given back automatically and has not yet (the refund failed, or
  * for a pay-rest excess without a payment id, cannot be made automatically). The daily job
- * retries the refunds; Tanya refunds by hand whatever stays here.
+ * retries the refunds (for 30 days); Tanya refunds by hand whatever stays here and marks it
+ * with markRefundedByHand.
  */
 export async function loadUnrefunded(db: SqlClient): Promise<UnrefundedPayment[]> {
   const r = await db.query<{
@@ -95,6 +96,32 @@ export async function loadUnrefunded(db: SqlClient): Promise<UnrefundedPayment[]
     currency: x.currency ? x.currency.toUpperCase() : null, seenAt: new Date(x.seen_at).toISOString(),
     bookerName: x.name, bookerEmail: x.email, bookerPhone: x.phone,
   }));
+}
+
+/**
+ * Tanya refunded it herself in Stripe: records `manual:<time>` as the refund id, so the daily job
+ * stops retrying and the row leaves the list (no guest notice is sent for it). Only rows still
+ * without a refund id; false when there was none.
+ */
+export async function markRefundedByHand(
+  db: SqlClient,
+  kind: UnrefundedPayment["kind"],
+  ref: string,
+  now: Date,
+): Promise<boolean> {
+  const marker = `manual:${now.toISOString()}`;
+  const r =
+    kind === "inactive_invoice"
+      ? await db.query<{ k: string }>(
+          "update invoice_refunds set refund_id = $2 where invoice_id = $1 and refund_id is null returning invoice_id as k",
+          [ref, marker],
+        )
+      : await db.query<{ k: string }>(
+          `update pay_rest_settlements set refund_id = $2
+            where session_id = $1 and refund_id is null and excess_minor > 0 returning session_id as k`,
+          [ref, marker],
+        );
+  return r.rows.length > 0;
 }
 
 export async function loadPaymentsDue(db: SqlClient, today: string): Promise<PaymentsDue> {

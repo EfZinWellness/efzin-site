@@ -45,6 +45,11 @@ export interface SendOptions {
   ref?: string;
   /** Database for email_log; defaults to the shared pool. */
   db?: SqlClient | null;
+  /**
+   * When the email_log claim itself fails (database down), send anyway without dedupe instead
+   * of throwing. For error reports: a duplicate alert beats a lost one.
+   */
+  sendIfClaimFails?: boolean;
 }
 
 export type SendEmailFn = (
@@ -103,8 +108,14 @@ export async function sendEmail(
 ): Promise<void> {
   let logDb: SqlClient | null = null;
   if (opts?.ref) {
-    logDb = opts.db ?? (await getSqlClient());
-    if (logDb && !(await claimEmail(logDb, kind, to, opts.ref))) return;
+    try {
+      logDb = opts.db ?? (await getSqlClient());
+      if (logDb && !(await claimEmail(logDb, kind, to, opts.ref))) return;
+    } catch (err) {
+      if (!opts.sendIfClaimFails) throw err;
+      console.error(`[email] email_log claim failed for ${kind}; sending without dedupe`, err);
+      logDb = null;
+    }
   }
   try {
     const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim()).filter(Boolean);

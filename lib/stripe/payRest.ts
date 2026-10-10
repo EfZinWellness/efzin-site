@@ -3,7 +3,7 @@ import type { SqlClient } from "../content/sync";
 import { sendQuietly, type SendEmailFn } from "../email/send";
 import { aedValueOf } from "../payments/aed";
 import { adminAddress } from "../requests/handlers";
-import { refundPayRestExcessNow, sendRefundNotice } from "./autoRefunds";
+import { refundPayRestExcessNow, RETRY_COPY, sendRefundNotice } from "./autoRefunds";
 import { refId, type StripeApi } from "./client";
 import { sequence, type AfterCommit } from "./events";
 import { revenueUnknown } from "./invoiceEvents";
@@ -141,6 +141,7 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
   const toRefund = st.excess_minor > 0 && pi !== null && st.refund_id === null;
   let refundFailed: string | null = null;
   let refundId: string | null = null;
+  let alreadyRefunded = false;
   const details = {
     bookingId: st.booking_id,
     bookingStatus: st.booking_status,
@@ -156,12 +157,14 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
     toRefund &&
       (async () => {
         try {
-          refundId = await refundPayRestExcessNow(deps.db, deps.stripe, {
+          const out = await refundPayRestExcessNow(deps.db, deps.stripe, {
             session_id: s.id,
             booking_id: st.booking_id,
             payment_intent: pi!,
             excess_minor: st.excess_minor,
           });
+          if (out.outcome === "already_refunded") alreadyRefunded = true;
+          else refundId = out.id;
         } catch (err) {
           // Don't fail the event: the invoices still get voided, the daily job retries the refund.
           refundFailed = err instanceof Error ? err.message : String(err);
@@ -173,8 +176,7 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
       refundFailed !== null
         ? sendQuietly(deps.sendEmail, "admin_error", adminAddress(), {
             context: "pay_rest_refund_failed",
-            problem:
-              "A guest overpaid when paying the rest of a booking and the automatic refund failed. The daily job retries it, and it is listed on the admin Payments page until it goes through; refund the excess by hand if it stays there.",
+            problem: `A guest overpaid when paying the rest of a booking and the automatic refund failed. It is listed on the admin Payments page. ${RETRY_COPY}`,
             ...details,
             excessMinor: st.excess_minor,
             error: refundFailed,
@@ -183,10 +185,12 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
     (toRefund || (st.excess_minor > 0 && pi === null) || (!active && st.excess_minor === 0) || unmatched) &&
       (async () => {
         if (refundFailed !== null) return;
-        const refunded = st.excess_minor > 0 && pi !== null;
+        const refunded = st.excess_minor > 0 && pi !== null && !alreadyRefunded;
         await sendQuietly(deps.sendEmail, "admin_error", adminAddress(), {
-          context: refunded ? "pay_rest_excess_refunded" : "pay_rest_needs_review",
-          problem: refunded
+          context: refunded ? "pay_rest_excess_refunded" : alreadyRefunded ? "pay_rest_already_refunded" : "pay_rest_needs_review",
+          problem: alreadyRefunded
+            ? "A guest paid the rest of a booking and part of it was due back, but Stripe already shows at least that amount refunded on the payment. Nothing was refunded again; please check the payment in Stripe."
+            : refunded
             ? active
               ? "A guest paid the rest of a booking after part of it had already been paid. The difference was refunded automatically."
               : "A guest paid the rest of a booking that is no longer active. The payment was refunded automatically."

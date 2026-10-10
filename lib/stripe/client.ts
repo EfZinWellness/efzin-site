@@ -98,7 +98,7 @@ export interface StripeApi {
   };
   refunds: {
     list(params: Stripe.RefundListParams): Promise<{
-      data: { id: string; status: string | null; metadata: Stripe.Metadata | null }[];
+      data: { id: string; status: string | null; metadata: Stripe.Metadata | null; amount: number; created: number }[];
       has_more: boolean;
     }>;
     create(params: Stripe.RefundCreateParams, options?: Stripe.RequestOptions): Promise<{ id: string }>;

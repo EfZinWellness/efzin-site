@@ -10,6 +10,8 @@ import {
   type UnrefundedPayment,
 } from "@/lib/admin/payments";
 import { formatExpiry } from "@/lib/account/format";
+import { RETRY_COPY } from "@/lib/stripe/autoRefunds";
+import { markRefundedByHandForm } from "../actions";
 
 const REASONS: Record<AttentionReason, string> = {
   failed: "Payment failed",
@@ -74,12 +76,12 @@ export default async function PaymentsDuePage() {
         <>
           <h2 className="mt-8 font-serif text-xl text-oxblood">Refunds still to make</h2>
           <p className="mt-2 text-sm text-navy/80">
-            Money the site should have given back automatically but could not yet. It retries every morning; refund by hand in
-            Stripe anything that stays here.
+            Money the site should have given back automatically but could not yet. {RETRY_COPY} (Retries stop after 30 days,
+            and you get an email when they do.)
           </p>
           <table className="stack mt-4">
             <thead>
-              <tr><th>Seen</th><th>Why</th><th>Experience</th><th>Amount</th><th>Stripe</th><th>Booker</th><th>Contact</th></tr>
+              <tr><th>Seen</th><th>Why</th><th>Experience</th><th>Amount</th><th>Stripe</th><th>Booker</th><th>Contact</th><th></th></tr>
             </thead>
             <tbody>
               {unrefunded.map((u) => (
@@ -95,6 +97,15 @@ export default async function PaymentsDuePage() {
                   <td data-label="Contact">
                     {u.bookerEmail ? <a href={`mailto:${u.bookerEmail}`} className="underline underline-offset-4">{u.bookerEmail}</a> : null}
                     {u.bookerPhone ? <span className="block"><a href={`tel:${u.bookerPhone}`} className="underline underline-offset-4">{u.bookerPhone}</a></span> : null}
+                  </td>
+                  <td data-label="">
+                    <form action={markRefundedByHandForm}>
+                      <input type="hidden" name="kind" value={u.kind} />
+                      <input type="hidden" name="ref" value={u.ref} />
+                      <button type="submit" className="text-[10px] uppercase tracking-[0.2em] underline underline-offset-4">
+                        Mark refunded by hand
+                      </button>
+                    </form>
                   </td>
                 </tr>
               ))}

@@ -2,7 +2,14 @@ import type Stripe from "stripe";
 import { cancelBooking } from "../booking/cancel";
 import { dubaiToday } from "../giftcards/dates";
 import { adminAddress } from "../requests/handlers";
-import { pendingAutoRefunds, refundInactiveInvoiceNow, refundNotices, refundPayRestExcessNow } from "../stripe/autoRefunds";
+import {
+  AUTO_REFUND_RETRY_DAYS,
+  pendingAutoRefunds,
+  refundInactiveInvoiceNow,
+  refundNotices,
+  refundPayRestExcessNow,
+  type AutoRefundResult,
+} from "../stripe/autoRefunds";
 import type { StripeApi } from "../stripe/client";
 import type { AfterCommit } from "../stripe/events";
 import { onInvoicePaid } from "../stripe/invoiceEvents";
@@ -235,7 +242,30 @@ export async function finishPendingRefunds(ctx: JobContext, stripe: StripeApi | 
  * /admin/payments lists them. Returns how many were refunded in this run.
  */
 export async function retryAutoRefunds(ctx: JobContext, stripe: StripeApi | null): Promise<number> {
-  const { invoices, payRest } = await pendingAutoRefunds(ctx.db);
+  const pending = await pendingAutoRefunds(ctx.db);
+  const cutoff = ctx.now.getTime() - AUTO_REFUND_RETRY_DAYS * 86_400_000;
+  const recent = <T extends { created_at: Date }>(rows: T[]) => rows.filter((r) => r.created_at.getTime() > cutoff);
+  // Past the retry window: Tanya is told once (email_log) and the row stays on /admin/payments.
+  const admin = adminAddress();
+  for (const row of [...pending.invoices, ...pending.payRest].filter((r) => r.created_at.getTime() <= cutoff)) {
+    const ref = "invoice_id" in row ? row.invoice_id : row.session_id;
+    await mail(
+      ctx,
+      "admin_error",
+      admin,
+      {
+        context: "auto_refund_gave_up",
+        problem: `An automatic refund has failed every morning for ${AUTO_REFUND_RETRY_DAYS} days, so the site has stopped retrying it. Please refund it in Stripe, then press 'Mark refunded by hand' on the admin Payments page.`,
+        bookingId: row.booking_id,
+        stripeRef: ref,
+        amountMinor: "invoice_id" in row ? row.amount_minor : row.excess_minor,
+        seenAt: row.created_at.toISOString(),
+      },
+      `auto_refund_gave_up:${ref}`,
+    );
+  }
+  const invoices = recent(pending.invoices);
+  const payRest = recent(pending.payRest);
   if (invoices.length + payRest.length === 0) return 0;
   if (!stripe) {
     await report(ctx, new Error("STRIPE_SECRET_KEY is not configured: automatic refunds not retried"), "daily_auto_refunds", {
@@ -245,22 +275,30 @@ export async function retryAutoRefunds(ctx: JobContext, stripe: StripeApi | null
     return 0;
   }
   let done = 0;
-  for (const row of invoices) {
+  const attempt = async (ref: string, bookingId: string | null, fn: () => Promise<AutoRefundResult>) => {
     try {
-      await refundInactiveInvoiceNow(ctx.db, stripe, row);
-      done++;
+      const out = await fn();
+      if (out.outcome === "already_refunded") {
+        await mail(
+          ctx,
+          "admin_error",
+          admin,
+          {
+            context: "auto_refund_already_refunded",
+            problem:
+              "An automatic refund was due, but Stripe already shows at least that amount refunded on the payment (no matching refund found). Nothing was refunded again. Please check the payment in Stripe.",
+            bookingId,
+            stripeRef: ref,
+          },
+          `auto_refund_already_refunded:${ref}`,
+        );
+      } else done++;
     } catch (err) {
-      await report(ctx, err, `daily_auto_refund_${row.invoice_id}`, { bookingId: row.booking_id, invoiceId: row.invoice_id });
+      await report(ctx, err, `daily_auto_refund_${ref}`, { bookingId, stripeRef: ref });
     }
-  }
-  for (const row of payRest) {
-    try {
-      await refundPayRestExcessNow(ctx.db, stripe, row);
-      done++;
-    } catch (err) {
-      await report(ctx, err, `daily_auto_refund_${row.session_id}`, { bookingId: row.booking_id, session: row.session_id });
-    }
-  }
+  };
+  for (const row of invoices) await attempt(row.invoice_id, row.booking_id, () => refundInactiveInvoiceNow(ctx.db, stripe, row, ctx.now));
+  for (const row of payRest) await attempt(row.session_id, row.booking_id, () => refundPayRestExcessNow(ctx.db, stripe, row, ctx.now));
   return done;
 }
 
