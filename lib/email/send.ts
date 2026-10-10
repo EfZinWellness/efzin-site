@@ -26,6 +26,7 @@ export type EmailKind =
   | "gift_card_used"
   | "gift_card_expiring"
   | "booking_cancelled_unpaid"
+  | "booking_final_reminder"
   | "booking_cancelled"
   | "booking_transferred"
   | "payment_refunded";

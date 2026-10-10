@@ -148,6 +148,63 @@ describe("daily job: unpaid at the balance due date", () => {
     expect(w.stripe.voided).toEqual([]);
   });
 
+  it("final reminder on the day before cancellation only, once, to the booker and Tanya, with the amount, deadline and the invoice's pay link", async () => {
+    const b = await attemptedAndFailed();
+    w.stripe.invoiceDetails.in_open = { hosted_invoice_url: "https://invoice.stripe.test/in_open" };
+    await runDaily(w.db, at("2027-05-31"), deps);
+    expect(sent.filter((s) => s.kind === "booking_final_reminder")).toEqual([]);
+
+    await runDaily(w.db, at("2027-06-01"), deps);
+    const reminders = sent.filter((s) => s.kind === "booking_final_reminder");
+    expect(kinds(reminders)).toEqual(["booking_final_reminder>amal@x.com", `booking_final_reminder>${ADMIN}`]);
+    const guest = reminders.find((s) => s.to === "amal@x.com")!;
+    expect(guest.text).toContain("€1,920");
+    expect(guest.text).toContain("2 Jun 2027");
+    expect(guest.text).toContain("https://invoice.stripe.test/in_open");
+    expect(guest.text).toContain("cancellation policy");
+    const admin = reminders.find((s) => s.to === ADMIN)!;
+    expect(admin.text).toContain("amal@x.com");
+    expect(admin.text).toContain(b.bookingId);
+
+    // Once per booking per deadline (email_log ref = booking id + deadline).
+    await runDaily(w.db, at("2027-06-01"), deps);
+    expect(sent.filter((s) => s.kind === "booking_final_reminder")).toHaveLength(2);
+    const log = await w.db.query<{ ref: string }>("select distinct ref from email_log where kind = 'booking_final_reminder'");
+    expect(log.rows).toEqual([{ ref: `${b.bookingId}:2027-06-02` }]);
+
+    // The day after: cancelled, no further reminder.
+    await runDaily(w.db, at("2027-06-02"), deps);
+    expect(await status("bookings", b.bookingId)).toBe("cancelled");
+    expect(sent.filter((s) => s.kind === "booking_final_reminder")).toHaveLength(2);
+  });
+
+  it("final reminder without an invoice pay link points to My Ef Zin's Pay the rest now", async () => {
+    const b = await attemptedAndFailed();
+    await runDaily(w.db, at("2027-06-01"), deps);
+    const guest = sent.find((s) => s.kind === "booking_final_reminder" && s.to === "amal@x.com")!;
+    expect(guest.text).toContain(`${ORIGIN}/account/bookings/${b.bookingId}`);
+  });
+
+  it("no final reminder for a booking with an instalment still to come, or one that is fully paid", async () => {
+    w.stripe.invoiceStatus.in_old = "open";
+    await plan("amal@x.com", "cus_a", [
+      { seq: 1, dueOn: "2027-05-01", amount: 96000, status: "failed", invoice: "in_old" },
+      { seq: 2, dueOn: "2027-06-10", amount: 96000, status: "scheduled" },
+    ]);
+    await seedBooking(w.db, {
+      slug: "test-retreat",
+      status: "paid",
+      booker: { name: "Bea B", email: "bea@x.com", detailsComplete: true },
+      items: [
+        { seq: 0, dueOn: "2027-01-10", amount: 48000, status: "paid" },
+        { seq: 1, dueOn: "2027-05-01", amount: 192000, status: "paid" },
+      ],
+    });
+    await runDaily(w.db, at("2027-05-02"), { ...deps, stripe: null });
+    await runDaily(w.db, at("2027-05-03"), { ...deps, stripe: null });
+    expect(sent.filter((s) => s.kind === "booking_final_reminder")).toEqual([]);
+  });
+
   it("cancels two days after the last unpaid item: items cancelled, invoices voided, nothing charged or refunded, booker and Tanya told", async () => {
     const b = await attemptedAndFailed();
     const paid = await seedBooking(w.db, {

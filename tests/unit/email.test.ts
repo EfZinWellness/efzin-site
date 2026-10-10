@@ -150,6 +150,19 @@ const CASES: [EmailKind, Record<string, unknown>, { subject: string; text: strin
     { subject: "Booking cancelled (balance unpaid): Retreat", text: ["Layla <l@x.com>", "b1"] },
   ],
   [
+    "booking_final_reminder",
+    { name: "Layla", experience: "Retreat", amountMinor: 192000, currency: "EUR", deadline: "2027-06-02", payUrl: "https://invoice.stripe.test/x" },
+    {
+      subject: "Final reminder: your balance for Retreat",
+      text: ["€1,920", "2 Jun 2027","https://invoice.stripe.test/x", "cancelled under our cancellation policy"],
+    },
+  ],
+  [
+    "booking_final_reminder",
+    { forAdmin: true, experience: "Retreat", booker: "Layla <l@x.com>", amountMinor: 192000, currency: "EUR", deadline: "2027-06-02", bookingId: "b1" },
+    { subject: "Final reminder sent (balance unpaid): Retreat", text: ["Layla <l@x.com>", "b1", "2 Jun 2027"] },
+  ],
+  [
     "booking_cancelled",
     {
       name: "Layla",
@@ -211,7 +224,7 @@ describe("email templates", () => {
 
   it("covers every kind with a template, even with no data", async () => {
     const kinds = new Set(CASES.map((c) => c[0]));
-    expect(kinds.size).toBe(25);
+    expect(kinds.size).toBe(26);
     for (const k of kinds) {
       const r = await renderEmail(k, {});
       expect(r.subject.length).toBeGreaterThan(0);

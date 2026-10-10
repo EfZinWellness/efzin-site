@@ -7,7 +7,7 @@ import type { StripeApi } from "../stripe/client";
 import type { AfterCommit } from "../stripe/events";
 import { onInvoicePaid } from "../stripe/invoiceEvents";
 import { settleCancellation } from "../stripe/refund";
-import { mail, report, type JobContext } from "./context";
+import { addDays, mail, report, type JobContext } from "./context";
 
 /** Days after an unpaid instalment's due date or first charge attempt (the later) before cancelling (Stripe retries, pay links). */
 export const UNPAID_GRACE_DAYS = 2;
@@ -83,6 +83,69 @@ export async function cancelUnpaidBookings(
     }
   }
   return cancelled;
+}
+
+/**
+ * `booking_final_reminder` on the day before a part-paid booking becomes cancellable for an
+ * unpaid balance (the same rule as cancelUnpaidBookings: every unpaid item attempted, and the
+ * latest of their grace starts plus UNPAID_GRACE_DAYS is tomorrow). To the booker, with the
+ * amount, the deadline (the day the daily job would cancel) and a pay link (the open invoice's
+ * Stripe page when there is exactly one, else "Pay the rest now" in My Ef Zin), and the same to
+ * Tanya. At most once per booking per deadline (email_log ref = `<booking id>:<deadline>`).
+ */
+export async function sendFinalReminders(ctx: JobContext, stripe: StripeApi | null): Promise<number> {
+  const today = dubaiToday(ctx.now);
+  const deadline = addDays(today, 1);
+  const r = await ctx.db.query<
+    BookingFacts & { unpaid: number; currency: string; invoices: string[]; items: number }
+  >(
+    `select ${FACTS}, sum(i.amount_minor)::int as unpaid, min(i.currency) as currency,
+            array_remove(array_agg(i.stripe_invoice_id order by i.seq), null) as invoices, count(*)::int as items
+       from bookings b
+       join experiences e on e.id = b.experience_id
+       join people p on p.id = b.booker_person_id
+       join payment_schedule_items i on i.booking_id = b.id and i.status in ('scheduled', 'failed') and i.amount_minor > 0
+      where b.status = 'deposit_paid'
+      group by b.id, p.id, e.id
+     having bool_and(i.due_on < $1::date)
+        and bool_and(i.first_attempted_at is not null or i.status = 'failed')
+        and max(greatest(i.due_on, coalesce(((i.first_attempted_at at time zone 'UTC') + interval '4 hours')::date, i.due_on)))
+            + $2::int = $3::date
+      order by b.created_at`,
+    [today, UNPAID_GRACE_DAYS, deadline],
+  );
+  const admin = adminAddress();
+  let n = 0;
+  for (const b of r.rows) {
+    const payUrl = (b.items === 1 && b.invoices.length === 1 ? await hostedInvoiceUrl(ctx, stripe, b.invoices[0], b.id) : null)
+      ?? `${ctx.origin}/account/bookings/${b.id}`;
+    const data = {
+      experience: b.title,
+      startsAt: b.start_at ? new Date(b.start_at).toISOString() : null,
+      timezone: b.timezone,
+      amountMinor: b.unpaid,
+      currency: b.currency ?? b.base_currency,
+      deadline,
+      payUrl,
+    };
+    const ref = `${b.id}:${deadline}`;
+    const facts = { bookingId: b.id };
+    if (await mail(ctx, "booking_final_reminder", b.email, { ...data, name: b.name }, ref, facts)) n++;
+    await mail(ctx, "booking_final_reminder", admin, { ...data, forAdmin: true, booker: `${b.name} <${b.email}>`, bookingId: b.id }, ref, facts);
+  }
+  return n;
+}
+
+/** The open invoice's Stripe payment page, or null (no Stripe, not open, or Stripe unreachable). */
+async function hostedInvoiceUrl(ctx: JobContext, stripe: StripeApi | null, invoiceId: string, bookingId: string): Promise<string | null> {
+  if (!stripe) return null;
+  try {
+    const inv = await stripe.invoices.retrieve(invoiceId);
+    return inv.status === "open" && inv.hosted_invoice_url ? inv.hosted_invoice_url : null;
+  } catch (err) {
+    console.error("[final reminder] invoice lookup failed; using the account link", bookingId, invoiceId, err);
+    return null;
+  }
 }
 
 /**

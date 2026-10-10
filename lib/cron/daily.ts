@@ -10,6 +10,7 @@ import {
   finishPendingRefunds,
   retryAutoRefunds,
   sendAutoRefundNotices,
+  sendFinalReminders,
   sendUnpaidCancellationNotices,
 } from "./unpaid";
 
@@ -25,6 +26,8 @@ export interface DailyDeps {
 }
 
 export interface DailySummary {
+  /** "Pay by tomorrow or the booking is cancelled" reminders (the day before cancellation). */
+  finalReminders: number | null;
   cancelledUnpaid: number | null;
   unpaidNotices: number | null;
   /** Bookings whose failed cancellation refunds were retried. */
@@ -50,8 +53,10 @@ export interface DailySummary {
  */
 export async function runDaily(db: SqlClient, now: Date, deps: DailyDeps): Promise<DailySummary> {
   const ctx: JobContext = { db, now, sendEmail: deps.sendEmail, origin: deps.origin };
+  const finalReminders = await step(ctx, "daily_final_reminders", () => sendFinalReminders(ctx, deps.stripe));
   const cancelledUnpaid = await step(ctx, "daily_cancel_unpaid", () => cancelUnpaidBookings(ctx, deps.stripe, deps.usdRates));
   return {
+    finalReminders,
     cancelledUnpaid,
     unpaidNotices: await step(ctx, "daily_unpaid_notices", () => sendUnpaidCancellationNotices(ctx)),
     refundRetries: await step(ctx, "daily_refund_retries", () => finishPendingRefunds(ctx, deps.stripe)),

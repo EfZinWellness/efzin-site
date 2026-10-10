@@ -72,6 +72,8 @@ export interface StripeApi {
       amount_paid?: number;
       currency?: string;
       metadata?: Stripe.Metadata | null;
+      /** Stripe's page where the guest can pay an open invoice (final reminder). */
+      hosted_invoice_url?: string | null;
     }>;
     finalizeInvoice(
       id: string,

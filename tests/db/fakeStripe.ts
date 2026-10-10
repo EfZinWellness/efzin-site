@@ -183,7 +183,10 @@ export class FakeStripe implements StripeApi {
   /** Runs inside invoices.create, after the draft exists and before it is returned (race tests). */
   onInvoiceCreate: (() => Promise<void>) | null = null;
   /** Extra fields returned by invoices.retrieve (for invoices not created through this fake). */
-  invoiceDetails: Record<string, { amount_paid?: number; currency?: string; metadata?: Stripe.Metadata | null }> = {};
+  invoiceDetails: Record<
+    string,
+    { amount_paid?: number; currency?: string; metadata?: Stripe.Metadata | null; hosted_invoice_url?: string | null }
+  > = {};
   /** Set to make invoices.retrieve throw (Stripe unreachable). */
   invoiceRetrieveError: unknown = null;
   /** Draft invoices deleted (invoices.del). */
