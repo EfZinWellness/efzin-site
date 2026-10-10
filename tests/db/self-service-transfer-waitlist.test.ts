@@ -139,7 +139,7 @@ describe("cancel-experience (Ef Zin cancels every booking)", () => {
     expect(text).toContain("full refund");
   });
 
-  it("--send refunds every booking in full with no fee deduction and emails the guests", async () => {
+  it("--send cancels every booking, moves no money yet, asks each booker to choose refund or credit and tells the guests", async () => {
     const [a, b] = await twoBookings();
     const r = await runCancelExperience(w.db, w.stripe, "test-event", "send", {
       now: daysBefore(EVENT_START, 1),
@@ -148,12 +148,9 @@ describe("cancel-experience (Ef Zin cancels every booking)", () => {
       outDir: mkdtempSync(join(tmpdir(), "efzin-cancel-")),
     });
     expect(r.bookings).toBe(2);
-    expect(refunds(w).sort((x, y) => String(x.charge).localeCompare(String(y.charge)))).toEqual([
-      { charge: "ch_layla@x.com", amount: 28000 },
-      { charge: "ch_omar@x.com", amount: 28000 },
-    ]);
-    for (const id of [a.bookingId, b.bookingId]) expect(await status(w.db, "bookings", id)).toBe("refunded");
-    expect(sent()).toEqual(["booking_cancelled>layla@x.com", "booking_cancelled>omar@x.com", "booking_cancelled>sara@x.com"]);
+    expect(refunds(w)).toEqual([]);
+    for (const id of [a.bookingId, b.bookingId]) expect(await status(w.db, "bookings", id)).toBe("cancelled");
+    expect(sent()).toEqual(["booking_cancelled>sara@x.com", "efzin_cancellation_choice>layla@x.com", "efzin_cancellation_choice>omar@x.com"]);
     expect(w.emails.filter((e) => e.kind === "waitlist_open")).toEqual([]);
   });
 });

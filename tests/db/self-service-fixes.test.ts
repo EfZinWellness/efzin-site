@@ -110,19 +110,22 @@ describe("refunds and Ef Zin cancellations", () => {
   it("--send goes on after a booking fails, and reports the failure", async () => {
     const a = await paidEvent(w, "layla@x.com");
     const b = await paidEvent(w, "omar@x.com");
-    const list = w.stripe.charges.list;
-    w.stripe.charges.list = async (p) => {
-      if (p.payment_intent === "pi_layla@x.com") throw new Error("stripe down");
-      return list(p);
+    // Recording Layla's choice row fails (rolled back); Omar's booking still goes ahead.
+    const query = w.db.query.bind(w.db);
+    const flaky = {
+      query: async <T,>(sql: string, params?: unknown[]) => {
+        if (sql.startsWith("insert into cancellation_choices") && params?.[0] === a.bookingId) throw new Error("db down");
+        return query<T>(sql, params);
+      },
     };
-    const r = await runCancelExperience(w.db, w.stripe, "test-event", "send", {
+    const r = await runCancelExperience(flaky, w.stripe, "test-event", "send", {
       now: daysBefore(EVENT_START, 3),
       ...opts(),
       outDir: mkdtempSync(join(tmpdir(), "efzin-cancel-")),
     });
-    expect(r.failures).toEqual([{ bookingId: a.bookingId, error: "stripe down" }]);
+    expect(r.failures).toEqual([{ bookingId: a.bookingId, error: "db down" }]);
     expect(await status(w.db, "bookings", a.bookingId)).toBe("paid");
-    expect(await status(w.db, "bookings", b.bookingId)).toBe("refunded");
+    expect(await status(w.db, "bookings", b.bookingId)).toBe("cancelled");
     expect(w.emails.filter((e) => e.kind === "admin_error").map((e) => e.data.context)).toContain("cancel_experience_failed");
   });
 

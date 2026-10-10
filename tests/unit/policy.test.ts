@@ -84,13 +84,21 @@ describe("cancelOptions: standard_retreat", () => {
 });
 
 describe("cancelOptions: Ef Zin cancels", () => {
-  it("event 1h before gets full refund without fee deduction", () => {
+  it("event 1h before: full refund without fee deduction, or the full amount paid as credit (guest's choice)", () => {
     const opts = cancelOptions(input({ startsAt: startIn(HOUR), cancelledBy: "efzin" }));
-    expect(opts).toEqual([{ kind: "refund", ratio: 1, deductFees: false }, { kind: "transfer" }]);
+    expect(opts).toEqual([
+      { kind: "refund", ratio: 1, deductFees: false },
+      { kind: "credit", amountAedMinor: 10000 },
+      { kind: "transfer" },
+    ]);
   });
   it("retreat gets the same regardless of timing", () => {
     const opts = cancelOptions(input({ template: "standard_retreat", startsAt: startIn(5 * DAY), cancelledBy: "efzin" }));
-    expect(opts).toEqual([{ kind: "refund", ratio: 1, deductFees: false }, { kind: "transfer" }]);
+    expect(opts).toEqual([
+      { kind: "refund", ratio: 1, deductFees: false },
+      { kind: "credit", amountAedMinor: 10000 },
+      { kind: "transfer" },
+    ]);
   });
 });
 

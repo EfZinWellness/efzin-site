@@ -2,7 +2,8 @@ import type { SqlClient } from "../content/sync";
 import type { SendEmailFn } from "../email/send";
 import { expireGiftCards } from "../giftcards/db";
 import type { StripeApi } from "../stripe/client";
-import { step, type JobContext } from "./context";
+import { decideOverdueChoices } from "../booking/efzinChoice";
+import { report, step, type JobContext } from "./context";
 import { chargeDueItems, remindUpcomingPayments } from "./payments";
 import { remindExpiringCredits, remindExpiringGiftCards, remindGuests, type ExperienceInfo } from "./reminders";
 import {
@@ -30,6 +31,8 @@ export interface DailySummary {
   finalReminders: number | null;
   cancelledUnpaid: number | null;
   unpaidNotices: number | null;
+  /** Ef Zin cancellations refunded by default (no refund-or-credit choice by the deadline). */
+  efzinDefaultRefunds: number | null;
   /** Bookings whose failed cancellation refunds were retried. */
   refundRetries: number | null;
   /** Automatic refunds (late payment on an inactive booking, pay-rest excess) made on retry. */
@@ -59,6 +62,13 @@ export async function runDaily(db: SqlClient, now: Date, deps: DailyDeps): Promi
     finalReminders,
     cancelledUnpaid,
     unpaidNotices: await step(ctx, "daily_unpaid_notices", () => sendUnpaidCancellationNotices(ctx)),
+    // Before the refund retries, so a default refund that fails is retried in the same run.
+    efzinDefaultRefunds: await step(ctx, "daily_efzin_default_refunds", () =>
+      decideOverdueChoices(db, deps.stripe, now, {
+        sendEmail: deps.sendEmail,
+        report: (err, bookingId) => report(ctx, err, `daily_efzin_default_${bookingId}`, { bookingId }),
+      }),
+    ),
     refundRetries: await step(ctx, "daily_refund_retries", () => finishPendingRefunds(ctx, deps.stripe)),
     autoRefundRetries: await step(ctx, "daily_auto_refunds", () => retryAutoRefunds(ctx, deps.stripe)),
     refundNotices: await step(ctx, "daily_refund_notices", () => sendAutoRefundNotices(ctx)),

@@ -8,6 +8,7 @@ import { balanceReminder } from "./balanceReminder";
 import { bookingCancelled } from "./bookingCancelled";
 import { bookingCancelledUnpaid } from "./bookingCancelledUnpaid";
 import { bookingFinalReminder } from "./bookingFinalReminder";
+import { efzinCancellationChoice } from "./efzinCancellationChoice";
 import { bookingTransferred } from "./bookingTransferred";
 import { bookingConfirmed } from "./bookingConfirmed";
 import { creditExpiring } from "./creditExpiring";
@@ -52,6 +53,7 @@ export const TEMPLATES: Record<EmailKind, EmailTemplate> = {
   gift_card_expiring: giftCardExpiring,
   booking_cancelled_unpaid: bookingCancelledUnpaid,
   booking_final_reminder: bookingFinalReminder,
+  efzin_cancellation_choice: efzinCancellationChoice,
   booking_cancelled: bookingCancelled,
   booking_transferred: bookingTransferred,
   payment_refunded: paymentRefunded,

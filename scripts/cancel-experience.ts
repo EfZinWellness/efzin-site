@@ -1,11 +1,16 @@
 /**
  * Ef Zin cancels an experience (used by Claude when Tanya asks).
  *
- *   npx tsx scripts/cancel-experience.ts <slug> --dry-run   # writes the guest email to .superpowers/cancellations/ for approval
- *   npx tsx scripts/cancel-experience.ts <slug> --send      # refunds every booking in full and emails the guests
+ *   npx tsx scripts/cancel-experience.ts <slug> --dry-run   # writes the booker email to .superpowers/cancellations/ for approval
+ *   npx tsx scripts/cancel-experience.ts <slug> --send      # cancels every booking; each booker chooses refund or credit
  *
- * Needs DATABASE_URL; --send also needs STRIPE_SECRET_KEY and RESEND_API_KEY. After --send, set the
- * experience's status in its content file (e.g. `past`) and sync, so it can't be booked again.
+ * --send cancels the bookings and frees the spots straight away but moves no money: each booker
+ * gets a link to choose a full refund or the full amount as credit; after 7 days without a
+ * choice the daily job refunds in full. Choices are listed on /admin/payments.
+ *
+ * Needs DATABASE_URL (and SUPABASE_DB_CA_CERT for Supabase); --send also needs STRIPE_SECRET_KEY
+ * and RESEND_API_KEY. After --send, set the experience's status in its content file (e.g. `past`)
+ * and sync, so it can't be booked again.
  */
 import { Pool } from "pg";
 import { runCancelExperience } from "../lib/booking/cancelExperience";
@@ -51,11 +56,12 @@ async function main(): Promise<number> {
       return 0;
     }
     for (const o of result.outcomes) {
-      console.log(`${o.bookingId}: ${o.status}${o.problems.length ? ` (problems: ${o.problems.join("; ")})` : ""}`);
+      const what = o.cancelled ? "cancelled, refund-or-credit choice emailed" : "already inactive, unchanged";
+      console.log(`${o.bookingId}: ${what}${o.problems.length ? ` (problems: ${o.problems.join("; ")})` : ""}`);
     }
     for (const f of result.failures) console.error(`${f.bookingId}: NOT cancelled (${f.error})`);
     console.log(
-      `${result.outcomes.length} of ${result.bookings} booking(s) cancelled. Now set the experience's status in its content file and sync.`,
+      `${result.outcomes.filter((o) => o.cancelled).length} of ${result.bookings} booking(s) cancelled. Now set the experience's status in its content file and sync.`,
     );
     return result.failures.length > 0 || result.outcomes.some((o) => o.problems.length > 0) ? 1 : 0;
   } finally {

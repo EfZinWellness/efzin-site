@@ -4,8 +4,9 @@ import type { SqlClient } from "../content/sync";
 import { renderEmail } from "../email/render";
 import { sendQuietly, type SendEmailFn } from "../email/send";
 import { adminAddress } from "../requests/handlers";
+import { dubaiToday } from "../giftcards/dates";
 import type { StripeApi } from "../stripe/client";
-import { cancelBooking, type CancelOutcome } from "./cancel";
+import { cancelForChoice, CHOICE_DAYS, choiceUrl, type ChoiceOffer } from "./efzinChoice";
 
 export interface CancelExperienceOptions {
   now: Date;
@@ -18,7 +19,7 @@ export interface CancelExperienceOptions {
 export interface CancelExperienceResult {
   bookings: number;
   previewFile: string | null;
-  outcomes: CancelOutcome[];
+  outcomes: ChoiceOffer[];
   /** Bookings that could not be cancelled (left unchanged). */
   failures: { bookingId: string; error: string }[];
 }
@@ -36,17 +37,18 @@ type Row = {
   gift_aed: number;
   gift_base: number;
   credit_base: number;
+  amount_aed: number | null;
 };
 
 const money = (minor: number, currency: string) => `${currency} ${(minor / 100).toFixed(2)}`;
 
 /**
- * Ef Zin cancels an experience: every active booking is cancelled with `cancelledBy: 'efzin'`
- * (full refund, no fee deduction; gift parts back to the gift cards, or credit when a card has
- * expired) and every guest is emailed.
+ * Ef Zin cancels an experience: every active booking is cancelled at once (spots freed, plans
+ * stopped) and each booker is asked to choose a full refund or the full amount as credit
+ * (lib/booking/efzinChoice.ts); no money moves until they choose or the deadline passes.
  *
  * `dry-run` changes nothing and calls no Stripe API: it writes the affected bookings and the
- * guest email (rendered) to a file for Tanya to approve. `send` does it for real.
+ * booker's choice email (rendered) to a file for Tanya to approve. `send` does it for real.
  */
 export async function runCancelExperience(
   db: SqlClient,
@@ -61,7 +63,7 @@ export async function runCancelExperience(
                    where g.booking_id = b.id and gp.id <> b.booker_person_id order by gp.email) as guests,
             b.amount_paid_base_minor as paid_base, coalesce(b.base_currency, e.base_currency) as base_currency,
             b.gift_card_applied_aed_minor as gift_aed, b.gift_card_applied_base_minor as gift_base,
-            b.credit_applied_base_minor as credit_base
+            b.credit_applied_base_minor as credit_base, b.amount_aed_minor as amount_aed
        from bookings b
        join experiences e on e.id = b.experience_id
        join people p on p.id = b.booker_person_id
@@ -73,28 +75,35 @@ export async function runCancelExperience(
 
   if (mode === "dry-run") {
     const first = rows[0];
-    const sample = await renderEmail("booking_cancelled", {
+    const token = "<token>";
+    const sample = await renderEmail("efzin_cancellation_choice", {
       name: first?.booker_name ?? "Layla Haddad",
       experience: first?.title ?? slug,
       startsAt: first?.start_at ? new Date(first.start_at).toISOString() : null,
       timezone: first?.timezone,
-      byEfzin: true,
-      cardRefunds: first ? [{ amountMinor: cardPart(first), currency: first.base_currency ?? "AED" }] : [],
+      amountMinor: first?.paid_base ?? 0,
+      currency: first?.base_currency ?? "AED",
+      creditAedMinor: first ? creditAed(first) : 0,
       giftCardAed: first?.gift_aed ?? 0,
+      deadline: dubaiToday(new Date(opts.now.getTime() + CHOICE_DAYS * 86_400_000)),
+      refundUrl: choiceUrl(opts.origin, token, "refund"),
+      creditUrl: choiceUrl(opts.origin, token, "credit"),
     });
     const lines = [
       `Cancel ${first?.title ?? slug} (${slug}): ${rows.length} booking(s). DRY RUN: nothing has been changed or refunded.`,
       "",
-      "Affected bookings (full refund, no fees deducted; amounts paid by card are refunded in the currency charged):",
+      `--send cancels every booking and frees the spots at once, but moves no money: each booker chooses a full refund (no fees deducted; card amounts in the currency charged, gift card parts back to the gift card) or the full amount as AED credit (12 months). With no choice after ${CHOICE_DAYS} days the daily job refunds in full.`,
+      "",
+      "Affected bookings:",
       ...rows.map(
         (b) =>
-          `- ${b.booker_name} <${b.booker_email}>${b.guests.length ? `, guests: ${b.guests.join(", ")}` : ""}: card ${money(
-            cardPart(b),
+          `- ${b.booker_name} <${b.booker_email}>${b.guests.length ? `, guests: ${b.guests.join(", ")}` : ""}: paid ${money(
+            b.paid_base ?? 0,
             b.base_currency ?? "AED",
-          )}${b.gift_aed > 0 ? `, gift card AED ${(b.gift_aed / 100).toFixed(2)} returned` : ""}`,
+          )} (card ${money(cardPart(b), b.base_currency ?? "AED")}${b.gift_aed > 0 ? `, gift card AED ${(b.gift_aed / 100).toFixed(2)}` : ""}); as credit AED ${(creditAed(b) / 100).toFixed(2)}`,
       ),
       "",
-      `Email to each booker (guests get a short version). Subject: ${sample.subject}`,
+      `Email to each booker (other guests get the short "your place is cancelled" note). Subject: ${sample.subject}`,
       "",
       sample.text,
       "",
@@ -107,19 +116,13 @@ export async function runCancelExperience(
     return { bookings: rows.length, previewFile: file, outcomes: [], failures: [] };
   }
 
-  const outcomes: CancelOutcome[] = [];
+  const outcomes: ChoiceOffer[] = [];
   const failures: { bookingId: string; error: string }[] = [];
   for (const b of rows) {
-    // One booking failing (e.g. a Stripe error while reading its charges, which rolls that
-    // booking back) never stops the others; the failures are reported and can be re-run.
+    // One booking failing (rolled back) never stops the others; the failures are reported and
+    // can be re-run.
     try {
-      outcomes.push(
-        await cancelBooking(db, stripe, b.id, "refund", "efzin", opts.now, {
-          sendEmail: opts.sendEmail,
-          origin: opts.origin,
-          notifyWaitlist: false,
-        }),
-      );
+      outcomes.push(await cancelForChoice(db, stripe, b.id, opts.now, { sendEmail: opts.sendEmail, origin: opts.origin }));
     } catch (err) {
       failures.push({ bookingId: b.id, error: err instanceof Error ? err.message : String(err) });
     }
@@ -136,3 +139,6 @@ export async function runCancelExperience(
 
 /** What was paid by card, in the base currency (paid minus gift and credit). */
 const cardPart = (b: Row) => Math.max(0, (b.paid_base ?? 0) - b.gift_base - b.credit_base);
+
+/** The credit option: the whole amount paid, in AED. */
+const creditAed = (b: Row) => ((b.base_currency ?? "AED").toUpperCase() === "AED" ? (b.paid_base ?? 0) : (b.amount_aed ?? 0));

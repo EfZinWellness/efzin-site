@@ -124,6 +124,58 @@ export async function markRefundedByHand(
   return r.rows.length > 0;
 }
 
+export interface CancellationChoiceRow {
+  bookingId: string;
+  slug: string;
+  title: string;
+  bookerName: string;
+  bookerEmail: string;
+  /** Amount paid, in the booking's base currency. */
+  amountMinor: number;
+  currency: string;
+  offeredAt: string;
+  deadlineAt: string;
+  choice: "refund" | "credit" | null;
+  decidedBy: "guest" | "default" | null;
+  decidedAt: string | null;
+}
+
+/**
+ * Ef Zin cancellations awaiting or given the guest's refund-or-credit choice: every open one,
+ * and those decided in the last 90 days. Open ones first (soonest deadline), then the latest.
+ */
+export async function loadCancellationChoices(db: SqlClient): Promise<CancellationChoiceRow[]> {
+  const r = await db.query<{
+    booking_id: string; slug: string; title: string; name: string; email: string; paid: number | null; currency: string;
+    offered_at: string | Date; deadline_at: string | Date; choice: "refund" | "credit" | null;
+    decided_by: "guest" | "default" | null; decided_at: string | Date | null;
+  }>(
+    `select c.booking_id, e.slug, e.title, p.name, p.email, b.amount_paid_base_minor as paid,
+            coalesce(b.base_currency, e.base_currency) as currency, c.offered_at, c.deadline_at, c.choice, c.decided_by, c.decided_at
+       from cancellation_choices c
+       join bookings b on b.id = c.booking_id
+       join experiences e on e.id = b.experience_id
+       join people p on p.id = b.booker_person_id
+      where c.choice is null or c.decided_at > now() - interval '90 days'
+      order by (c.choice is not null), case when c.choice is null then c.deadline_at end, c.decided_at desc, c.booking_id`,
+  );
+  const iso = (v: string | Date) => new Date(v).toISOString();
+  return r.rows.map((x) => ({
+    bookingId: x.booking_id,
+    slug: x.slug,
+    title: x.title,
+    bookerName: x.name,
+    bookerEmail: x.email,
+    amountMinor: x.paid ?? 0,
+    currency: (x.currency ?? "AED").toUpperCase(),
+    offeredAt: iso(x.offered_at),
+    deadlineAt: iso(x.deadline_at),
+    choice: x.choice,
+    decidedBy: x.decided_by,
+    decidedAt: x.decided_at ? iso(x.decided_at) : null,
+  }));
+}
+
 export async function loadPaymentsDue(db: SqlClient, today: string): Promise<PaymentsDue> {
   const r = await db.query<{
     id: string; booking_id: string; seq: number; due_on: string; amount_minor: number; currency: string;

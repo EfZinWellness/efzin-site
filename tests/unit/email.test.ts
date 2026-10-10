@@ -188,6 +188,33 @@ const CASES: [EmailKind, Record<string, unknown>, { subject: string; text: strin
     { subject: "Sound Bath has been cancelled", text: ["full refund", "no fees deducted", "AED 280", "future experience"] },
   ],
   [
+    "efzin_cancellation_choice",
+    {
+      name: "Layla Haddad",
+      experience: "Sound Bath",
+      amountMinor: 28000,
+      currency: "AED",
+      creditAedMinor: 28000,
+      deadline: "2027-02-05",
+      refundUrl: `${ORIGIN}/account/cancellation/t1?choice=refund`,
+      creditUrl: `${ORIGIN}/account/cancellation/t1?choice=credit`,
+    },
+    {
+      subject: "Sound Bath has been cancelled: refund or credit?",
+      text: ["Dear Layla,", "AED 280", "no fees deducted", "12 months", "5 Feb 2027", "?choice=refund", "?choice=credit", "refund you in full automatically"],
+    },
+  ],
+  [
+    "booking_cancelled",
+    { name: "Layla", experience: "Sound Bath", byEfzin: true, chose: "credit", creditAed: 28000, creditCode: "EFZ-ABCDEF" },
+    { subject: "Sound Bath has been cancelled", text: ["As you chose", "Ef Zin credit", "EFZ-ABCDEF"] },
+  ],
+  [
+    "booking_cancelled",
+    { name: "Layla", experience: "Sound Bath", byEfzin: true, chose: "refund", defaulted: true, cardRefunds: [{ amountMinor: 28000, currency: "AED" }] },
+    { subject: "Sound Bath has been cancelled", text: ["didn't hear back", "Refund to your card", "280", "no fees deducted"] },
+  ],
+  [
     "booking_cancelled",
     { name: "Sara", experience: "Sound Bath", forGuest: true, bookerName: "Layla H" },
     { subject: "Your place at Sound Bath has been cancelled", text: ["Layla H has cancelled", "your place is cancelled too"] },
@@ -224,7 +251,7 @@ describe("email templates", () => {
 
   it("covers every kind with a template, even with no data", async () => {
     const kinds = new Set(CASES.map((c) => c[0]));
-    expect(kinds.size).toBe(26);
+    expect(kinds.size).toBe(27);
     for (const k of kinds) {
       const r = await renderEmail(k, {});
       expect(r.subject.length).toBeGreaterThan(0);

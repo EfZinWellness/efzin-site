@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { TEST_AUTH_COOKIE, testAuthEmail } from "./lib/auth/testSeam";
 
-const PUBLIC = ["/account/signin", "/account/auth"];
+// /account/cancellation/<token>: the refund-or-credit choice after Ef Zin cancels (token only, no login).
+const PUBLIC = ["/account/signin", "/account/auth", "/account/cancellation"];
 
 /**
  * /account/* needs a session: refreshes the Supabase auth cookies and sends visitors without

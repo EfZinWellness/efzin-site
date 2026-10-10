@@ -9,7 +9,8 @@ const RETREAT_HALF_BAND_HOURS = 30 * 24;
 /** What a guest may do when cancelling. Empty array = nothing allowed. */
 export function cancelOptions(i: PolicyInput): CancelOption[] {
   if (i.cancelledBy === "efzin") {
-    return [{ kind: "refund", ratio: 1, deductFees: false }, { kind: "transfer" }];
+    // The guest chooses a full refund or the full amount paid as credit (lib/booking/efzinChoice.ts).
+    return [{ kind: "refund", ratio: 1, deductFees: false }, { kind: "credit", amountAedMinor: i.amountPaidAedMinor }, { kind: "transfer" }];
   }
 
   const hours = (i.startsAt.getTime() - i.now.getTime()) / HOUR_MS;

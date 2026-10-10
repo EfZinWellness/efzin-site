@@ -14,8 +14,9 @@ function cardLine(v: unknown): string {
 }
 
 /**
- * The booker's cancellation confirmation (self-service, or `byEfzin` when Ef Zin cancelled), with
- * what comes back where. `forGuest`: a guest on an Ef Zin-cancelled booking (no money facts).
+ * The booker's cancellation confirmation (self-service, or `byEfzin` when Ef Zin cancelled: then
+ * `chose` refund/credit and `defaulted` when the deadline passed without a choice), with what
+ * comes back where. `forGuest`: a guest on the booking (no money facts).
  */
 export const bookingCancelled: EmailTemplate = {
   subject: (d) =>
@@ -44,10 +45,22 @@ export const bookingCancelled: EmailTemplate = {
           <P>{greeting(d.name)}</P>
           <P>We’re very sorry to let you know that {experience} has been cancelled.</P>
           {d.forGuest === true ? (
-            <P>The person who booked your place will receive a full refund. We hope to welcome you at another Ef Zin experience soon.</P>
+            <P>The person who booked your place will get everything they paid back. We hope to welcome you at another Ef Zin experience soon.</P>
+          ) : d.chose === "credit" ? (
+            <>
+              <P>As you chose, everything you paid has been turned into Ef Zin credit:</P>
+              <Facts rows={rows} />
+              <P>Enter the credit code when you book any event or retreat.</P>
+            </>
           ) : (
             <>
-              <P>You’ll receive a full refund, with no fees deducted:</P>
+              {d.defaulted === true ? (
+                <P>We didn&apos;t hear back from you by the deadline, so as promised we&apos;ve refunded you in full, with no fees deducted:</P>
+              ) : d.chose === "refund" ? (
+                <P>As you chose, we&apos;ve refunded you in full, with no fees deducted:</P>
+              ) : (
+                <P>You’ll receive a full refund, with no fees deducted:</P>
+              )}
               <Facts rows={rows} />
               <P>Card refunds usually reach your account within 5 to 10 working days.</P>
               <P>Would you rather move to a future experience instead? Just reply to this email and we’ll arrange it.</P>

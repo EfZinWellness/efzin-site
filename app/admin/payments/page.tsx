@@ -3,6 +3,7 @@ import { ExportLink, NoDatabase, PageTitle, Stat } from "@/components/admin/ui";
 import { adminDb } from "@/lib/admin/access";
 import {
   dubaiToday,
+  loadCancellationChoices,
   loadPaymentsDue,
   loadUnrefunded,
   type AttentionReason,
@@ -66,7 +67,11 @@ function Table({ items, chase }: { items: PaymentItem[]; chase: boolean }) {
 export default async function PaymentsDuePage() {
   const db = await adminDb();
   if (!db) return <><PageTitle>Payments due</PageTitle><NoDatabase /></>;
-  const [p, unrefunded] = await Promise.all([loadPaymentsDue(db, dubaiToday(new Date())), loadUnrefunded(db)]);
+  const [p, unrefunded, choices] = await Promise.all([
+    loadPaymentsDue(db, dubaiToday(new Date())),
+    loadUnrefunded(db),
+    loadCancellationChoices(db),
+  ]);
 
   return (
     <>
@@ -106,6 +111,39 @@ export default async function PaymentsDuePage() {
                         Mark refunded by hand
                       </button>
                     </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
+
+      {choices.length > 0 ? (
+        <>
+          <h2 className="mt-8 font-serif text-xl">Cancelled by Ef Zin: refund or credit</h2>
+          <p className="mt-2 text-sm text-navy/80">
+            Each booker chooses a full refund or credit. With no choice by the deadline, the morning job refunds in full.
+          </p>
+          <table className="stack mt-4">
+            <thead>
+              <tr><th>Experience</th><th>Guest</th><th>Amount paid</th><th>Deadline</th><th>Choice</th></tr>
+            </thead>
+            <tbody>
+              {choices.map((c) => (
+                <tr key={c.bookingId}>
+                  <td className="lead">
+                    <Link href={`/admin/experiences/${c.slug}`} className="underline underline-offset-4">{c.title}</Link>
+                  </td>
+                  <td data-label="Guest">
+                    {c.bookerName} <a href={`mailto:${c.bookerEmail}`} className="block underline underline-offset-4">{c.bookerEmail}</a>
+                  </td>
+                  <td data-label="Amount paid">{money(c.amountMinor, c.currency)}</td>
+                  <td data-label="Deadline">{formatExpiry(c.deadlineAt)}</td>
+                  <td data-label="Choice">
+                    {c.choice === null
+                      ? "Waiting"
+                      : `${c.choice === "refund" ? "Refund" : "Credit"}${c.decidedBy === "default" ? " (default)" : ""}${c.decidedAt ? `, ${formatExpiry(c.decidedAt)}` : ""}`}
                   </td>
                 </tr>
               ))}

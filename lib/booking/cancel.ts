@@ -132,7 +132,7 @@ export async function cancelBooking(
 }
 
 /** What the cancellation actually did (a dead gift card turns its part into credit). */
-interface Applied {
+export interface Applied {
   creditCode: string | null;
   giftCardAed: number;
   creditAed: number;
@@ -152,6 +152,15 @@ async function applyInDb(
     [b.id, plan.status, cancelledBy, now.toISOString(), reason],
   );
   await db.query("update payment_schedule_items set status = 'cancelled' where booking_id = $1 and status in ('scheduled', 'failed')", [b.id]);
+  return applyMoney(db, b, plan, now);
+}
+
+/**
+ * The money writes of a cancellation (caller's transaction): gift part back to the gift card
+ * (credit if it can't take it), credit issued, card refunds recorded in booking_refunds (made by
+ * settleCancellation after the commit).
+ */
+export async function applyMoney(db: SqlClient, b: CancelBookingRow, plan: CancellationPlan, now: Date): Promise<Applied> {
   let creditAed = plan.toCreditAed;
   let giftCardAed = plan.toGiftCardAed;
   if (plan.toGiftCardAed > 0 && b.gift_card_id) {
