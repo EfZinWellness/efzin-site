@@ -12,7 +12,7 @@ import {
 } from "@/lib/admin/payments";
 import { formatExpiry } from "@/lib/account/format";
 import { RETRY_COPY } from "@/lib/stripe/autoRefunds";
-import { markRefundedByHandForm } from "../actions";
+import { markRefundedByHandForm, resendChoiceEmailForm } from "../actions";
 
 const REASONS: Record<AttentionReason, string> = {
   failed: "Payment failed",
@@ -141,9 +141,19 @@ export default async function PaymentsDuePage() {
                   <td data-label="Amount paid">{money(c.amountMinor, c.currency)}</td>
                   <td data-label="Deadline">{formatExpiry(c.deadlineAt)}</td>
                   <td data-label="Choice">
-                    {c.choice === null
-                      ? "Waiting"
-                      : `${c.choice === "refund" ? "Refund" : "Credit"}${c.decidedBy === "default" ? " (default)" : ""}${c.decidedAt ? `, ${formatExpiry(c.decidedAt)}` : ""}`}
+                    {c.choice === null ? (
+                      <>
+                        Waiting
+                        <form action={resendChoiceEmailForm} className="mt-1">
+                          <input type="hidden" name="bookingId" value={c.bookingId} />
+                          <button type="submit" className="text-[10px] uppercase tracking-[0.2em] underline underline-offset-4">
+                            Resend choice email
+                          </button>
+                        </form>
+                      </>
+                    ) : (
+                      `${c.choice === "refund" ? "Refund" : "Credit"}${c.decidedBy === "default" ? " (default)" : ""}${c.decidedAt ? `, ${formatExpiry(c.decidedAt)}` : ""}`
+                    )}
                   </td>
                 </tr>
               ))}

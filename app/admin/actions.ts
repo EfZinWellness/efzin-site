@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { adminPerson } from "@/lib/auth/admin";
 import { toggleCheckInDb, type CheckInResult } from "@/lib/admin/checkin";
 import { markRefundedByHand } from "@/lib/admin/payments";
-import { getSqlClient } from "@/lib/db/client";
+import { resendChoiceEmail } from "@/lib/booking/efzinChoice";
+import { getSqlClient, withDbClient } from "@/lib/db/client";
+import { sendEmail } from "@/lib/email/send";
+import { requestOrigin } from "@/lib/requests/origin";
 
 /**
  * Check-in toggle. Server actions are public endpoints, so the admin check is
@@ -31,6 +34,19 @@ export async function markRefundedByHandForm(form: FormData): Promise<void> {
   const db = await getSqlClient();
   if (!db) return;
   await markRefundedByHand(db, kind, ref, new Date());
+  revalidatePath("/admin/payments");
+}
+
+/**
+ * /admin/payments "Resend choice email": the booker's refund-or-credit email again (same token),
+ * only while the choice is open. Admin-only.
+ */
+export async function resendChoiceEmailForm(form: FormData): Promise<void> {
+  if (!(await adminPerson())) return;
+  const bookingId = form.get("bookingId");
+  if (typeof bookingId !== "string" || !bookingId) return;
+  const origin = await requestOrigin();
+  await withDbClient((db) => resendChoiceEmail(db, bookingId, { sendEmail, origin }));
   revalidatePath("/admin/payments");
 }
 

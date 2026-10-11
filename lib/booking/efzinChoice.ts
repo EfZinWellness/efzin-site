@@ -39,6 +39,8 @@ export interface ChoiceOffer {
   token: string | null;
   /** Stripe steps that failed (voids, expiring sessions); retried by running again. */
   problems: string[];
+  /** The booker's refund-or-credit email went out (false: Tanya was alerted; resend from admin). */
+  emailSent: boolean;
 }
 
 export interface ChoiceDecision {
@@ -70,7 +72,7 @@ export async function cancelForChoice(
     if (!b) throw new CancelError("not_found");
     if (!ACTIVE.has(b.status)) {
       await db.query("commit");
-      return { bookingId, cancelled: false, token: null, problems: [] };
+      return { bookingId, cancelled: false, token: null, problems: [], emailSent: false };
     }
     await db.query(
       `update bookings set status = 'cancelled', cancelled_by = 'efzin', cancelled_at = $2, cancel_reason = 'efzin_cancelled'
@@ -94,38 +96,82 @@ export async function cancelForChoice(
   const problems = await settleCancellation(db, stripe, bookingId);
   const facts = await emailFacts(db, bookingId);
   const common = { experience: facts.title, startsAt: facts.startsAt, timezone: facts.timezone };
-  for (const p of facts.people) {
-    if (p.isBooker) {
-      await sendQuietly(
-        opts.sendEmail,
-        "efzin_cancellation_choice",
-        p.email,
-        {
-          ...common,
-          name: p.name,
-          amountMinor: facts.paidBase,
-          currency: facts.currency,
-          creditAedMinor: facts.creditAed,
-          giftCardAed: facts.giftAed,
-          deadline: dubaiToday(deadline),
-          refundUrl: choiceUrl(opts.origin, token, "refund"),
-          creditUrl: choiceUrl(opts.origin, token, "credit"),
-        },
-        undefined,
-        { ref: bookingId, db },
-      );
-    } else {
-      await sendQuietly(
-        opts.sendEmail,
-        "booking_cancelled",
-        p.email,
-        { ...common, name: p.name, byEfzin: true, forGuest: true, bookerName: facts.bookerName },
-        undefined,
-        { ref: bookingId, db },
-      );
-    }
+  for (const p of facts.people.filter((x) => !x.isBooker)) {
+    await sendQuietly(
+      opts.sendEmail,
+      "booking_cancelled",
+      p.email,
+      { ...common, name: p.name, byEfzin: true, forGuest: true, bookerName: facts.bookerName },
+      undefined,
+      { ref: bookingId, db },
+    );
   }
-  return { bookingId, cancelled: true, token, problems };
+  const emailSent = await sendChoiceEmail(db, opts.sendEmail, bookingId, token, deadline, opts.origin, { ref: bookingId });
+  if (!emailSent) {
+    await sendQuietly(opts.sendEmail, "admin_error", adminAddress(), {
+      context: "efzin_choice_email_failed",
+      problem:
+        "Ef Zin cancelled this booking, but the email asking the guest to choose a refund or credit could not be sent. Use 'Resend choice email' on the admin Payments page. Without a choice, the guest is refunded in full after 7 days.",
+      bookingId,
+    });
+  }
+  return { bookingId, cancelled: true, token, problems, emailSent };
+}
+
+/** The booker's refund-or-credit email (links with the token). True when it went out. */
+async function sendChoiceEmail(
+  db: SqlClient,
+  send: SendEmailFn,
+  bookingId: string,
+  token: string,
+  deadline: Date,
+  origin: string,
+  opts: { ref?: string },
+): Promise<boolean> {
+  const facts = await emailFacts(db, bookingId);
+  const booker = facts.people.find((p) => p.isBooker);
+  if (!booker) return false;
+  return sendQuietly(
+    send,
+    "efzin_cancellation_choice",
+    booker.email,
+    {
+      experience: facts.title,
+      startsAt: facts.startsAt,
+      timezone: facts.timezone,
+      name: booker.name,
+      amountMinor: facts.paidBase,
+      currency: facts.currency,
+      creditAedMinor: facts.creditAed,
+      giftCardAed: facts.giftAed,
+      deadline: dubaiToday(deadline),
+      refundUrl: choiceUrl(origin, token, "refund"),
+      creditUrl: choiceUrl(origin, token, "credit"),
+    },
+    undefined,
+    opts.ref ? { ref: opts.ref, db } : undefined,
+  );
+}
+
+/**
+ * Admin "Resend choice email": sends the booker's refund-or-credit email again, with the same
+ * token, while the choice is still open (no dedupe: Tanya asked for it). False when there is no
+ * open choice for the booking or the send failed.
+ */
+export async function resendChoiceEmail(
+  db: SqlClient,
+  bookingId: string,
+  opts: { sendEmail: SendEmailFn; origin: string },
+): Promise<boolean> {
+  if (!UUID_RE.test(bookingId)) return false;
+  const c = (
+    await db.query<{ token: string; deadline_at: string | Date }>(
+      "select token, deadline_at from cancellation_choices where booking_id = $1 and choice is null",
+      [bookingId],
+    )
+  ).rows[0];
+  if (!c) return false;
+  return sendChoiceEmail(db, opts.sendEmail, bookingId, c.token, new Date(c.deadline_at), opts.origin, {});
 }
 
 /**

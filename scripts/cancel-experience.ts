@@ -56,14 +56,22 @@ async function main(): Promise<number> {
       return 0;
     }
     for (const o of result.outcomes) {
-      const what = o.cancelled ? "cancelled, refund-or-credit choice emailed" : "already inactive, unchanged";
-      console.log(`${o.bookingId}: ${what}${o.problems.length ? ` (problems: ${o.problems.join("; ")})` : ""}`);
+      const what = !o.cancelled
+        ? "already inactive, unchanged"
+        : o.emailSent
+          ? "cancelled, refund-or-credit choice emailed"
+          : "cancelled, but the choice email FAILED (Tanya alerted; use 'Resend choice email' on /admin/payments)";
+      const line = `${o.bookingId}: ${what}${o.problems.length ? ` (problems: ${o.problems.join("; ")})` : ""}`;
+      if (o.cancelled && !o.emailSent) console.error(line);
+      else console.log(line);
     }
     for (const f of result.failures) console.error(`${f.bookingId}: NOT cancelled (${f.error})`);
     console.log(
       `${result.outcomes.filter((o) => o.cancelled).length} of ${result.bookings} booking(s) cancelled. Now set the experience's status in its content file and sync.`,
     );
-    return result.failures.length > 0 || result.outcomes.some((o) => o.problems.length > 0) ? 1 : 0;
+    const unsent = result.outcomes.filter((o) => o.cancelled && !o.emailSent).length;
+    if (unsent > 0) console.error(`${unsent} choice email(s) NOT sent: resend them from /admin/payments.`);
+    return result.failures.length > 0 || unsent > 0 || result.outcomes.some((o) => o.problems.length > 0) ? 1 : 0;
   } finally {
     conn.release();
     await pool.end();

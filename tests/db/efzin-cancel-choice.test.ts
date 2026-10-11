@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadCancellationChoices } from "../../lib/admin/payments";
 import { runCancelExperience } from "../../lib/booking/cancelExperience";
-import { decideChoice, loadChoiceView } from "../../lib/booking/efzinChoice";
+import { decideChoice, loadChoiceView, resendChoiceEmail } from "../../lib/booking/efzinChoice";
 import { runDaily } from "../../lib/cron/daily";
 import { renderEmail } from "../../lib/email/render";
 import { ORIGIN, world, type World } from "./webhookFixtures";
@@ -198,6 +198,30 @@ describe("Ef Zin cancels: the guest chooses refund or credit", () => {
       decidedBy: "guest",
     });
     expect(rows.find((r) => r.bookingId !== a.bookingId)).toMatchObject({ choice: null, decidedBy: null });
+  });
+
+  it("a choice email that fails is reported: Tanya is alerted with the booking id and --send does not claim success", async () => {
+    const a = await paidEvent(w, "layla@x.com");
+    const failing: typeof w.deps.sendEmail = async (kind, to, data) => {
+      if (kind === "efzin_cancellation_choice") throw new Error("resend down");
+      w.emails.push({ kind, to, data });
+    };
+    const r = await runCancelExperience(w.db, w.stripe, "test-event", "send", { ...opts(), sendEmail: failing });
+    expect(r.outcomes).toEqual([expect.objectContaining({ bookingId: a.bookingId, cancelled: true, emailSent: false })]);
+    const alert = w.emails.find((e) => e.kind === "admin_error" && e.data.context === "efzin_choice_email_failed");
+    expect(alert?.data).toMatchObject({ bookingId: a.bookingId });
+  });
+
+  it("Tanya can resend the choice email (same token) while the choice is open, not after", async () => {
+    const { a, tokenA } = await cancelEvent();
+    w.emails.length = 0;
+    expect(await resendChoiceEmail(w.db, a.bookingId, { sendEmail: w.deps.sendEmail, origin: ORIGIN })).toBe(true);
+    expect(sent()).toEqual(["efzin_cancellation_choice>layla@x.com"]);
+    expect(w.emails[0].data).toMatchObject({ refundUrl: `${ORIGIN}/account/cancellation/${tokenA}?choice=refund` });
+    await decideChoice(w.db, w.stripe, tokenA, "refund", "guest", NOW, { sendEmail: w.deps.sendEmail });
+    w.emails.length = 0;
+    expect(await resendChoiceEmail(w.db, a.bookingId, { sendEmail: w.deps.sendEmail, origin: ORIGIN })).toBe(false);
+    expect(w.emails).toEqual([]);
   });
 
   it("--dry-run previews the choice email, calls no Stripe API and changes nothing", async () => {
