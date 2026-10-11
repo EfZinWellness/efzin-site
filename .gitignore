@@ -24,3 +24,5 @@ yarn-debug.log*
 next-env.d.ts
 /test-results/
 /playwright-report/
+
+supabase-ca.crt
