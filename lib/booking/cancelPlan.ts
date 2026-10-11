@@ -12,8 +12,9 @@ export type CancelledBy = "guest" | "efzin";
  * not_found: no such booking (for this booker). not_active: already cancelled/refunded.
  * not_allowed: the policy doesn't allow this choice now. changed: the amounts differ from the
  * preview the guest confirmed. stripe_unavailable: card money is due but Stripe isn't configured.
+ * needs_review: Tanya must look first (e.g. a credit asked for after a refund was made by hand).
  */
-export type CancelErrorCode = "not_found" | "not_active" | "not_allowed" | "changed" | "stripe_unavailable";
+export type CancelErrorCode = "not_found" | "not_active" | "not_allowed" | "changed" | "stripe_unavailable" | "needs_review";
 
 export class CancelError extends Error {
   constructor(public readonly code: CancelErrorCode) {

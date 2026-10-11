@@ -12,6 +12,16 @@ import type { SqlClient } from "../content/sync";
  */
 export const REVENUE_STATUSES = "'paid', 'deposit_paid', 'cancelled'";
 
+/**
+ * SQL condition on bookings alias `b` (or none) for the revenue rule above. A booking Ef Zin
+ * cancelled is never revenue: while the guest's refund-or-credit choice is open it sits in
+ * 'cancelled' with cancel_reason 'efzin_cancelled' (afterwards it is 'refunded' / 'credited').
+ */
+export const revenueBooking = (alias = ""): string => {
+  const a = alias ? `${alias}.` : "";
+  return `(${a}status in (${REVENUE_STATUSES}) and ${a}cancel_reason is distinct from 'efzin_cancelled')`;
+};
+
 export interface UpcomingExperience {
   id: string;
   slug: string;
@@ -47,7 +57,7 @@ export async function loadUpcoming(db: SqlClient, now: Date): Promise<UpcomingEx
                        where b.experience_id = e.id and b.status in ('paid', 'deposit_paid')), 0)::int as sold,
             coalesce((select sum(available_spots(t.id)) from ticket_types t where t.experience_id = e.id), 0)::int as remaining,
             coalesce((select sum(b.amount_aed_minor) from bookings b
-                       where b.experience_id = e.id and b.status in (${REVENUE_STATUSES})), 0)::int as revenue,
+                       where b.experience_id = e.id and ${revenueBooking("b")}), 0)::int as revenue,
             coalesce((select count(*) from booking_guests g join bookings b on b.id = g.booking_id
                        where b.experience_id = e.id and b.status in ('paid', 'deposit_paid')
                          and not g.details_complete), 0)::int as missing
@@ -71,7 +81,7 @@ export async function loadUpcoming(db: SqlClient, now: Date): Promise<UpcomingEx
  */
 export async function loadRevenue(db: SqlClient): Promise<{ experienceAedMinor: number; giftSalesAedMinor: number }> {
   const r = await db.query<{ exp: number; gift: number }>(
-    `select coalesce((select sum(amount_aed_minor) from bookings where status in (${REVENUE_STATUSES})), 0)::int as exp,
+    `select coalesce((select sum(amount_aed_minor) from bookings where ${revenueBooking()}), 0)::int as exp,
             coalesce((select sum(amount_aed_minor) from gift_card_ledger where reason = 'issue'), 0)::int as gift`,
   );
   return { experienceAedMinor: r.rows[0].exp, giftSalesAedMinor: r.rows[0].gift };

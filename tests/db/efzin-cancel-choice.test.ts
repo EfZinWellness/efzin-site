@@ -3,7 +3,9 @@ import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadBooking } from "../../lib/account/bookings";
 import { loadCancellationChoices } from "../../lib/admin/payments";
+import { loadRevenue } from "../../lib/admin/upcoming";
 import { runCancelExperience } from "../../lib/booking/cancelExperience";
 import { decideChoice, loadChoiceView, resendChoiceEmail } from "../../lib/booking/efzinChoice";
 import { runDaily } from "../../lib/cron/daily";
@@ -222,6 +224,49 @@ describe("Ef Zin cancels: the guest chooses refund or credit", () => {
     w.emails.length = 0;
     expect(await resendChoiceEmail(w.db, a.bookingId, { sendEmail: w.deps.sendEmail, origin: ORIGIN })).toBe(false);
     expect(w.emails).toEqual([]);
+  });
+
+  it("credit is refused (Tanya alerted) when a charge was refunded by hand after the cancellation; nothing changes", async () => {
+    const { a, tokenA } = await cancelEvent();
+    w.emails.length = 0;
+    w.stripe.chargeStore["ch_layla@x.com"].amount_refunded = 28000;
+    w.stripe.existingRefunds.push({
+      id: "re_hand",
+      charge: "ch_layla@x.com",
+      amount: 28000,
+      status: "succeeded",
+      metadata: {},
+      created: Math.floor(NOW.getTime() / 1000) + 3600,
+    });
+    await expect(decideChoice(w.db, w.stripe, tokenA, "credit", "guest", NOW, { sendEmail: w.deps.sendEmail })).rejects.toMatchObject({
+      code: "needs_review",
+    });
+    expect((await w.db.query("select * from credits")).rows).toEqual([]);
+    expect((await choiceRow(a.bookingId)).choice).toBeNull();
+    expect(await status(w.db, "bookings", a.bookingId)).toBe("cancelled");
+    const alert = w.emails.find((e) => e.kind === "admin_error" && e.data.context === "efzin_credit_after_manual_refund");
+    expect(alert?.data).toMatchObject({ bookingId: a.bookingId });
+  });
+
+  it("undecided Ef Zin cancellations are not counted as revenue", async () => {
+    await paidEvent(w, "layla@x.com");
+    await paidEvent(w, "omar@x.com");
+    expect((await loadRevenue(w.db)).experienceAedMinor).toBe(56000);
+    await runCancelExperience(w.db, w.stripe, "test-event", "send", opts());
+    expect((await loadRevenue(w.db)).experienceAedMinor).toBe(0);
+    // An unpaid-balance cancellation that kept the deposit still counts (unchanged).
+    await w.db.query("update bookings set cancel_reason = 'unpaid_balance' where id = (select id from bookings limit 1)");
+    expect((await loadRevenue(w.db)).experienceAedMinor).toBe(28000);
+  });
+
+  it("My Ef Zin offers the booker the choice link while it is open", async () => {
+    const { a, tokenA } = await cancelEvent();
+    const booker = (await w.db.query<{ id: string }>("select booker_person_id as id from bookings where id = $1", [a.bookingId])).rows[0].id;
+    const sara = (await w.db.query<{ id: string }>("select id from people where email = 'sara@x.com'")).rows[0].id;
+    expect((await loadBooking(w.db, booker, a.bookingId))?.choiceToken).toBe(tokenA);
+    expect((await loadBooking(w.db, sara, a.bookingId))?.choiceToken).toBeNull();
+    await decideChoice(w.db, w.stripe, tokenA, "credit", "guest", NOW, { sendEmail: w.deps.sendEmail });
+    expect((await loadBooking(w.db, booker, a.bookingId))?.choiceToken).toBeNull();
   });
 
   it("--dry-run previews the choice email, calls no Stripe API and changes nothing", async () => {

@@ -9,7 +9,10 @@ export default function BookingCard({ booking: b }: { booking: AccountBooking })
   const next = b.schedule.find((i) => i.status === "scheduled");
   const owed = unpaidMinor(b.schedule);
   return (
-    <Link href={`/account/bookings/${b.id}`} className="block border border-sand bg-white/60 px-4 py-4 hover:border-navy">
+    <Link
+      href={b.choiceToken ? `/account/cancellation/${b.choiceToken}` : `/account/bookings/${b.id}`}
+      className="block border border-sand bg-white/60 px-4 py-4 hover:border-navy"
+    >
       <p className="font-serif text-lg leading-snug">{b.title}</p>
       <p className="mt-1 text-xs text-navy/70">
         {formatStart(b.startAt, b.timezone)}
@@ -19,7 +22,9 @@ export default function BookingCard({ booking: b }: { booking: AccountBooking })
         {STATUS_LABELS[b.status] ?? b.status}
         {b.isBooker ? "" : " · You're a guest"}
       </p>
-      {failed ? (
+      {b.choiceToken ? (
+        <p className="mt-2 text-xs text-oxblood underline underline-offset-4">Cancelled by Ef Zin: choose refund or credit</p>
+      ) : failed ? (
         <p className="mt-2 text-xs text-oxblood">A payment failed. Open the booking to pay or update your card.</p>
       ) : next && b.status === "deposit_paid" ? (
         <p className="mt-2 text-xs text-navy/80">

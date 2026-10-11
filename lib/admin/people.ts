@@ -1,6 +1,6 @@
 import type { SqlClient } from "../content/sync";
 import type { GuestHealth } from "./guests";
-import { REVENUE_STATUSES } from "./upcoming";
+import { revenueBooking } from "./upcoming";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const iso = (v: string | Date | null): string | null => (v === null ? null : new Date(v).toISOString());
@@ -16,7 +16,7 @@ export interface PersonRow {
   bookingCount: number;
 }
 
-const SPENT = `coalesce((select sum(b.amount_aed_minor) from bookings b where b.booker_person_id = p.id and b.status in (${REVENUE_STATUSES})), 0)::int`;
+const SPENT = `coalesce((select sum(b.amount_aed_minor) from bookings b where b.booker_person_id = p.id and ${revenueBooking("b")}), 0)::int`;
 const COUNT = `(select count(*) from bookings b where b.booker_person_id = p.id and b.status in ('paid', 'deposit_paid'))::int`;
 
 /** Case-insensitive search by name or email; `%` and `_` in the query are literal. Empty query lists everyone. */

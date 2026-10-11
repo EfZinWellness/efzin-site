@@ -30,6 +30,7 @@ const CANCEL_MESSAGES: Record<string, string> = {
   not_allowed: "This option isn't available under your booking's policy any more.",
   changed: "The amounts have changed since you opened this page (the policy depends on the time). Please review them again.",
   stripe_unavailable: "Refunds are not available right now. Please try again later.",
+  needs_review: "We need to check this booking first. Nothing has changed; we'll be in touch.",
 };
 
 export async function cancelBookingAction(_prev: FormState, form: FormData): Promise<FormState> {

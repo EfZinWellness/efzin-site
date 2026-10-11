@@ -53,6 +53,12 @@ export default async function BookingPage({ params, searchParams }: PageProps<"/
       {q.cancelled === "1" ? (
         <p role="status" className="mt-6 border border-sand p-3 text-sm">Your booking has been cancelled. We&rsquo;ve emailed you the details.</p>
       ) : null}
+      {b.choiceToken ? (
+        <Link href={`/account/cancellation/${b.choiceToken}`} className="mt-6 block border border-oxblood p-4 text-sm">
+          We&rsquo;re sorry: Ef Zin cancelled this experience.{" "}
+          <span className="underline underline-offset-4">Choose refund or credit</span>
+        </Link>
+      ) : null}
       {q.card === "updated" ? (
         <p role="status" className="mt-6 border border-sand p-3 text-sm">Thank you. Your new card will be used for the remaining payments.</p>
       ) : null}

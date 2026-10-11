@@ -39,6 +39,11 @@ export default async function CancellationChoicePage({
         Dear {v.firstName}, we&rsquo;re very sorry this experience has been cancelled. You paid {paid}.
       </p>
 
+      {q.error === "review" ? (
+        <p role="alert" className="mt-6 border border-oxblood p-3 text-sm text-oxblood">
+          We need to check your payment before we can give you credit. Nothing has changed; we&rsquo;ll be in touch shortly.
+        </p>
+      ) : null}
       {q.error === "1" ? (
         <p role="alert" className="mt-6 border border-oxblood p-3 text-sm text-oxblood">
           Something went wrong and nothing has changed. Please try again, or message us.

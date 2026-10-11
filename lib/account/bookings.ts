@@ -37,6 +37,8 @@ export interface AccountBooking {
   guests: AccountGuest[];
   /** The signed-in person's own guest row. */
   myDetailsComplete: boolean;
+  /** Ef Zin cancelled it and the booker's refund-or-credit choice is open: the choice page token (booker only). */
+  choiceToken: string | null;
 }
 
 interface Row {
@@ -52,6 +54,7 @@ interface Row {
   payment_option: string | null;
   base_currency: string | null;
   my_details_complete: boolean;
+  choice_token: string | null;
 }
 
 const ACTIVE = new Set(["paid", "deposit_paid"]);
@@ -62,7 +65,9 @@ async function bookingRows(db: SqlClient, personId: string, bookingId: string | 
   const r = await db.query<Row>(
     `select b.id, e.title, e.slug, e.type, e.start_at, e.timezone, e.venue, b.status,
             (b.booker_person_id = $1) as is_booker, b.payment_option, b.base_currency,
-            coalesce(bool_and(g.details_complete) filter (where g.person_id = $1), false) as my_details_complete
+            coalesce(bool_and(g.details_complete) filter (where g.person_id = $1), false) as my_details_complete,
+            (select c.token from cancellation_choices c
+              where c.booking_id = b.id and c.choice is null and b.booker_person_id = $1) as choice_token
        from bookings b
        join experiences e on e.id = b.experience_id
        left join booking_guests g on g.booking_id = b.id
@@ -118,6 +123,7 @@ async function attach(db: SqlClient, rows: Row[]): Promise<AccountBooking[]> {
     schedule: schedule.get(r.id) ?? [],
     guests: guests.get(r.id) ?? [],
     myDetailsComplete: r.my_details_complete,
+    choiceToken: r.choice_token,
   }));
 }
 

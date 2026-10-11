@@ -17,13 +17,16 @@ export async function confirmCancellationChoice(form: FormData): Promise<void> {
   const choice = form.get("choice");
   const page = `/account/cancellation/${encodeURIComponent(token)}`;
   if (choice !== "refund" && choice !== "credit") redirect(page);
-  let error = false;
+  let error: string | null = null;
   try {
     const done = await withDbClient((db) => decideChoice(db, getStripe(), token, choice, "guest", new Date(), { sendEmail }));
-    if (!done) error = true;
+    if (!done) error = "1";
   } catch (err) {
-    if (!(err instanceof CancelError && err.code === "not_found")) console.error("[cancellation choice] failed", err);
-    error = true;
+    if (err instanceof CancelError && err.code === "needs_review") error = "review";
+    else {
+      if (!(err instanceof CancelError && err.code === "not_found")) console.error("[cancellation choice] failed", err);
+      error = "1";
+    }
   }
-  redirect(error ? `${page}?error=1` : `${page}?done=1`);
+  redirect(error ? `${page}?error=${error}` : `${page}?done=1`);
 }

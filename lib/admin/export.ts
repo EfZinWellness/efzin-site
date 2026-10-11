@@ -5,7 +5,7 @@ import { loadAdminGiftCards } from "./giftCards";
 import { loadGuestList } from "./guests";
 import { dubaiToday, loadPaymentsDue } from "./payments";
 import { loadRequests } from "./requests";
-import { REVENUE_STATUSES } from "./upcoming";
+import { revenueBooking } from "./upcoming";
 
 export const EXPORT_KINDS = ["people", "bookings", "guests", "guests-health", "requests", "gift-cards", "payments-due"] as const;
 export type ExportKind = (typeof EXPORT_KINDS)[number];
@@ -40,7 +40,7 @@ export async function buildExport(
       }>(
         `select p.name, p.email, p.phone, to_char(p.birthday, 'YYYY-MM-DD') as birthday, p.how_heard,
                 p.marketing_consent, p.notes, p.created_at,
-                coalesce((select sum(b.amount_aed_minor) from bookings b where b.booker_person_id = p.id and b.status in (${REVENUE_STATUSES})), 0)::int as spent,
+                coalesce((select sum(b.amount_aed_minor) from bookings b where b.booker_person_id = p.id and ${revenueBooking("b")}), 0)::int as spent,
                 (select count(*) from bookings b where b.booker_person_id = p.id and b.status in ('paid', 'deposit_paid'))::int as n
            from people p order by p.name, p.id`,
       );

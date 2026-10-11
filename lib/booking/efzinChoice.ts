@@ -4,9 +4,9 @@ import { dubaiToday } from "../giftcards/dates";
 import { creditExpiry } from "../policy/credit";
 import { adminAddress } from "../requests/handlers";
 import type { StripeApi } from "../stripe/client";
-import { settleCancellation } from "../stripe/refund";
+import { bookingCharges, settleCancellation } from "../stripe/refund";
 import { applyMoney, CancelError, type CancelChoice } from "./cancel";
-import { loadForCancel, planCancellation } from "./cancelPlan";
+import { loadForCancel, planCancellation, type CancelBookingRow } from "./cancelPlan";
 
 /**
  * Ef Zin cancels an experience and each booker chooses what happens to their money (spec §9,
@@ -192,11 +192,13 @@ export async function decideChoice(
   let bookingId: string;
   let applied: Awaited<ReturnType<typeof applyMoney>>;
   let plan: Awaited<ReturnType<typeof planCancellation>>;
+  let manualRefund = false;
+  let bookingIdOf: string | null = null;
   await db.query("begin");
   try {
     const c = (
-      await db.query<{ booking_id: string; choice: CancelChoice | null; decided_by: DecidedBy | null }>(
-        "select booking_id, choice, decided_by from cancellation_choices where token = $1 for update",
+      await db.query<{ booking_id: string; choice: CancelChoice | null; decided_by: DecidedBy | null; offered_at: string | Date }>(
+        "select booking_id, choice, decided_by, offered_at from cancellation_choices where token = $1 for update",
         [token],
       )
     ).rows[0];
@@ -206,8 +208,14 @@ export async function decideChoice(
       return { outcome: "already_decided", bookingId: c.booking_id, choice: c.choice, decidedBy: c.decided_by ?? "guest", problems: [] };
     }
     bookingId = c.booking_id;
+    bookingIdOf = bookingId;
     const b = await loadForCancel(db, bookingId, now, true);
     if (!b) throw new CancelError("not_found");
+    // Credit on top of a refund Tanya already made by hand would pay twice: refuse and ask her.
+    if (choice === "credit" && (await refundedByHandSince(db, stripe, b, new Date(c.offered_at)))) {
+      manualRefund = true;
+      throw new CancelError("needs_review");
+    }
     // Ef Zin's terms: refund in full with no fees, or the whole amount paid as credit.
     plan = await planCancellation(db, stripe, b, choice, "efzin", now);
     await db.query("update bookings set status = $2 where id = $1", [bookingId, plan.status]);
@@ -219,6 +227,14 @@ export async function decideChoice(
     await db.query("commit");
   } catch (err) {
     await db.query("rollback").catch(() => {});
+    if (manualRefund && opts.sendEmail) {
+      await sendQuietly(opts.sendEmail, "admin_error", adminAddress(), {
+        context: "efzin_credit_after_manual_refund",
+        problem:
+          "A guest asked for credit after Ef Zin cancelled their booking, but Stripe shows a refund made on one of its payments since the cancellation (probably by hand). No credit was issued. Please check the payment in Stripe and settle it with the guest.",
+        bookingId: bookingIdOf,
+      });
+    }
     throw err;
   }
 
@@ -261,6 +277,24 @@ export async function decideChoice(
     }
   }
   return { outcome: "decided", bookingId, choice, decidedBy, problems };
+}
+
+/**
+ * True when one of the booking's card charges has a (live) refund made at or after `since` (the
+ * cancellation): the site makes none before the guest chooses, so it was made by hand. Card
+ * money needs Stripe to check: without it, stripe_unavailable.
+ */
+async function refundedByHandSince(db: SqlClient, stripe: StripeApi | null, b: CancelBookingRow, since: Date): Promise<boolean> {
+  const cardPaid = (b.paid_base ?? 0) - b.gift_base - b.credit_base;
+  if (cardPaid <= 0) return false;
+  if (!stripe) throw new CancelError("stripe_unavailable");
+  const sinceS = Math.floor(since.getTime() / 1000);
+  for (const ch of await bookingCharges(db, stripe, b.id)) {
+    if (ch.amount_refunded <= 0) continue;
+    const refunds = (await stripe.refunds.list({ charge: ch.id, limit: 100 })).data;
+    if (refunds.some((r) => r.status !== "failed" && r.status !== "canceled" && r.created >= sinceS)) return true;
+  }
+  return false;
 }
 
 /**
