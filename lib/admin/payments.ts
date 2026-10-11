@@ -124,6 +124,18 @@ export async function markRefundedByHand(
   return r.rows.length > 0;
 }
 
+/**
+ * The "Mark refunded by hand" form: the row (kind + Stripe ref) and the required confirm box
+ * (`confirm=yes`). Null when anything is missing, so nothing is marked by a stray click.
+ */
+export function parseMarkRefundedForm(form: FormData): { kind: UnrefundedPayment["kind"]; ref: string } | null {
+  const kind = form.get("kind");
+  const ref = form.get("ref");
+  if (form.get("confirm") !== "yes") return null;
+  if ((kind !== "inactive_invoice" && kind !== "pay_rest_excess") || typeof ref !== "string" || !ref) return null;
+  return { kind, ref };
+}
+
 export interface CancellationChoiceRow {
   bookingId: string;
   slug: string;

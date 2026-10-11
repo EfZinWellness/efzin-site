@@ -275,7 +275,7 @@ export async function retryAutoRefunds(ctx: JobContext, stripe: StripeApi | null
     return 0;
   }
   let done = 0;
-  const attempt = async (ref: string, bookingId: string | null, fn: () => Promise<AutoRefundResult>) => {
+  const attempt = async (ref: string, bookingId: string | null, amountMinor: number, currency: string | null, fn: () => Promise<AutoRefundResult>) => {
     try {
       const out = await fn();
       if (out.outcome === "already_refunded") {
@@ -285,10 +285,11 @@ export async function retryAutoRefunds(ctx: JobContext, stripe: StripeApi | null
           admin,
           {
             context: "auto_refund_already_refunded",
-            problem:
-              "An automatic refund was due, but Stripe already shows at least that amount refunded on the payment (no matching refund found). Nothing was refunded again. Please check the payment in Stripe.",
+            problem: `An automatic refund of ${amountMinor} (minor units${currency ? `, ${currency}` : ""}) was due, but Stripe already shows at least that amount refunded on the payment, with no refund matching it (other refunds on the payment, e.g. a cancellation, may account for it). Nothing was refunded again. The guest may still be owed ${amountMinor}${currency ? ` ${currency}` : ""}: please check the payment in Stripe, refund it if needed, then press 'Mark refunded by hand'.`,
             bookingId,
             stripeRef: ref,
+            mayStillBeOwedMinor: amountMinor,
+            currency,
           },
           `auto_refund_already_refunded:${ref}`,
         );
@@ -297,8 +298,12 @@ export async function retryAutoRefunds(ctx: JobContext, stripe: StripeApi | null
       await report(ctx, err, `daily_auto_refund_${ref}`, { bookingId, stripeRef: ref });
     }
   };
-  for (const row of invoices) await attempt(row.invoice_id, row.booking_id, () => refundInactiveInvoiceNow(ctx.db, stripe, row, ctx.now));
-  for (const row of payRest) await attempt(row.session_id, row.booking_id, () => refundPayRestExcessNow(ctx.db, stripe, row, ctx.now));
+  for (const row of invoices) {
+    await attempt(row.invoice_id, row.booking_id, row.amount_minor, row.currency, () => refundInactiveInvoiceNow(ctx.db, stripe, row, ctx.now));
+  }
+  for (const row of payRest) {
+    await attempt(row.session_id, row.booking_id, row.excess_minor, row.currency, () => refundPayRestExcessNow(ctx.db, stripe, row, ctx.now));
+  }
   return done;
 }
 

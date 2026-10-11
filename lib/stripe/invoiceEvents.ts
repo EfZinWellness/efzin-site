@@ -185,8 +185,8 @@ async function refundInactiveInvoice(invoice: Stripe.Invoice, item: ItemRow, dep
         await alertTanya(
           deps,
           "payment_on_inactive_booking_already_refunded",
-          `A scheduled payment was taken on booking ${item.booking_id} after it was cancelled, but Stripe already shows at least that amount refunded on the payment. Nothing was refunded again; please check the payment in Stripe.`,
-          facts,
+          `A scheduled payment was taken on booking ${item.booking_id} after it was cancelled, but Stripe already shows at least that amount refunded on the payment with no matching refund. Nothing was refunded again. The guest may still be owed ${invoice.amount_paid} (minor units): please check the payment in Stripe, refund if needed, then press 'Mark refunded by hand'.`,
+          { ...facts, mayStillBeOwedMinor: invoice.amount_paid },
         )();
         return;
       }

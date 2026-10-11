@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { adminPerson } from "@/lib/auth/admin";
 import { toggleCheckInDb, type CheckInResult } from "@/lib/admin/checkin";
-import { markRefundedByHand } from "@/lib/admin/payments";
+import { markRefundedByHand, parseMarkRefundedForm } from "@/lib/admin/payments";
 import { resendChoiceEmail } from "@/lib/booking/efzinChoice";
 import { getSqlClient, withDbClient } from "@/lib/db/client";
 import { sendEmail } from "@/lib/email/send";
@@ -28,12 +28,11 @@ export async function toggleCheckIn(bookingGuestId: string): Promise<CheckInResu
  */
 export async function markRefundedByHandForm(form: FormData): Promise<void> {
   if (!(await adminPerson())) return;
-  const kind = form.get("kind");
-  const ref = form.get("ref");
-  if ((kind !== "inactive_invoice" && kind !== "pay_rest_excess") || typeof ref !== "string" || !ref) return;
+  const parsed = parseMarkRefundedForm(form);
+  if (!parsed) return;
   const db = await getSqlClient();
   if (!db) return;
-  await markRefundedByHand(db, kind, ref, new Date());
+  await markRefundedByHand(db, parsed.kind, parsed.ref, new Date());
   revalidatePath("/admin/payments");
 }
 

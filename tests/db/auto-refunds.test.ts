@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadUnrefunded, markRefundedByHand } from "../../lib/admin/payments";
+import { loadUnrefunded, markRefundedByHand, parseMarkRefundedForm } from "../../lib/admin/payments";
 import { runDaily, type DailyDeps } from "../../lib/cron/daily";
 import { handleStripeEvent } from "../../lib/stripe/handlers";
 import { startPayRest } from "../../lib/stripe/selfServe";
@@ -227,6 +227,21 @@ describe("pay-rest excess whose automatic refund failed", () => {
     expect(await loadUnrefunded(w.db)).toEqual([]);
   });
 
+  it("a same-amount refund that is one of our own other refunds (metadata.kind set, e.g. a cancellation) is not adopted", async () => {
+    const { excess } = await failedExcessRefund();
+    w.stripe.existingRefunds.push({
+      id: "re_cancel",
+      charge: "ch_rest",
+      payment_intent: "pi_rest_1",
+      amount: excess,
+      status: "succeeded",
+      metadata: { kind: "cancellation", booking_id: "x" },
+      created: SEEN_S + 3600,
+    });
+    await runDaily(w.db, at("2027-03-10"), deps);
+    expect(await refundIdOf("select refund_id as r from pay_rest_settlements where session_id = $1", "cs_rest_1")).not.toBe("re_cancel");
+  });
+
   it("when the charge already shows at least the excess refunded, nothing is refunded: a marker is stored and Tanya alerted", async () => {
     const { excess } = await failedExcessRefund();
     w.stripe.addCharge({ id: "ch_rest", paymentIntent: "pi_rest_1", amount: excess * 3, currency: "eur", fee: 100, created: SEEN_S, amountRefunded: excess });
@@ -236,11 +251,25 @@ describe("pay-rest excess whose automatic refund failed", () => {
     const alerts = sent.filter((s) => s.kind === "admin_error" && s.text.includes("already"));
     expect(alerts).toHaveLength(1);
     expect(alerts[0].text).toContain("cs_rest_1");
+    // The amount the guest may still be owed is stated.
+    expect(alerts[0].text).toMatch(/may still be owed/);
+    expect(alerts[0].text).toContain(String(excess));
     // No "we've refunded" note to the guest for a refund the site did not make.
     expect(sent.filter((s) => s.kind === "payment_refunded")).toEqual([]);
     expect(await loadUnrefunded(w.db)).toEqual([]);
     await runDaily(w.db, at("2027-03-11"), deps);
     expect(w.stripe.refundsCreated).toEqual([]);
+  });
+
+  it("'Mark refunded by hand' needs its confirm box ticked", () => {
+    const form = (fields: Record<string, string>) => {
+      const f = new FormData();
+      for (const [k, v] of Object.entries(fields)) f.set(k, v);
+      return f;
+    };
+    expect(parseMarkRefundedForm(form({ kind: "pay_rest_excess", ref: "cs_1" }))).toBeNull();
+    expect(parseMarkRefundedForm(form({ kind: "pay_rest_excess", ref: "cs_1", confirm: "yes" }))).toEqual({ kind: "pay_rest_excess", ref: "cs_1" });
+    expect(parseMarkRefundedForm(form({ kind: "other", ref: "cs_1", confirm: "yes" }))).toBeNull();
   });
 
   it("'Mark refunded by hand' stops the retries and takes it off the list", async () => {

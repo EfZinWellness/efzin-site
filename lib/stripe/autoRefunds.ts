@@ -69,7 +69,9 @@ async function refundOnce(
   const earlier = refunds.find((r) => a.ours((r.metadata ?? {}) as Record<string, string>));
   if (earlier) return { id: earlier.id, outcome: "adopted" };
   const since = a.seenAt ? Math.floor(a.seenAt.getTime() / 1000) : Number.POSITIVE_INFINITY;
-  const byHand = refunds.find((r) => r.amount === a.amount && r.created >= since);
+  // A refund with our metadata kind is one of the site's own other refunds (e.g. a cancellation),
+  // never one made by hand for this amount.
+  const byHand = refunds.find((r) => !r.metadata?.kind && r.amount === a.amount && r.created >= since);
   if (byHand) return { id: byHand.id, outcome: "adopted" };
   const charges = (await stripe.charges.list({ payment_intent: a.pi, limit: 100 })).data.filter((c) => c.status === "succeeded");
   const refunded = charges.reduce((s, c) => s + c.amount_refunded, 0);
@@ -204,12 +206,15 @@ export async function sendRefundNotice(db: SqlClient, send: SendEmailFn, refundI
  */
 export async function pendingAutoRefunds(
   db: SqlClient,
-): Promise<{ invoices: (InactiveInvoiceRefund & { created_at: Date })[]; payRest: (PayRestExcessRefund & { created_at: Date })[] }> {
-  const inv = await db.query<InactiveInvoiceRefund & { created_at: string | Date }>(
-    "select invoice_id, booking_id, amount_minor, created_at from invoice_refunds where refund_id is null order by created_at, invoice_id",
+): Promise<{
+  invoices: (InactiveInvoiceRefund & { created_at: Date; currency: string | null })[];
+  payRest: (PayRestExcessRefund & { created_at: Date; currency: string | null })[];
+}> {
+  const inv = await db.query<InactiveInvoiceRefund & { created_at: string | Date; currency: string | null }>(
+    "select invoice_id, booking_id, amount_minor, currency, created_at from invoice_refunds where refund_id is null order by created_at, invoice_id",
   );
-  const rest = await db.query<PayRestExcessRefund & { created_at: string | Date }>(
-    `select session_id, booking_id, payment_intent, excess_minor, created_at from pay_rest_settlements
+  const rest = await db.query<PayRestExcessRefund & { created_at: string | Date; currency: string | null }>(
+    `select session_id, booking_id, payment_intent, excess_minor, currency, created_at from pay_rest_settlements
       where refund_id is null and excess_minor > 0 and payment_intent is not null
       order by created_at, session_id`,
   );

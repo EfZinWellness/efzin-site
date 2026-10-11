@@ -107,6 +107,10 @@ export default async function PaymentsDuePage() {
                     <form action={markRefundedByHandForm}>
                       <input type="hidden" name="kind" value={u.kind} />
                       <input type="hidden" name="ref" value={u.ref} />
+                      <label className="flex items-center gap-2 text-xs">
+                        <input type="checkbox" name="confirm" value="yes" required />
+                        I refunded this in Stripe
+                      </label>
                       <button type="submit" className="text-[10px] uppercase tracking-[0.2em] underline underline-offset-4">
                         Mark refunded by hand
                       </button>

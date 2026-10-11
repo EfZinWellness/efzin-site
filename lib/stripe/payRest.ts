@@ -189,7 +189,7 @@ export async function completePayRest(s: Stripe.Checkout.Session, deps: Deps): P
         await sendQuietly(deps.sendEmail, "admin_error", adminAddress(), {
           context: refunded ? "pay_rest_excess_refunded" : alreadyRefunded ? "pay_rest_already_refunded" : "pay_rest_needs_review",
           problem: alreadyRefunded
-            ? "A guest paid the rest of a booking and part of it was due back, but Stripe already shows at least that amount refunded on the payment. Nothing was refunded again; please check the payment in Stripe."
+            ? `A guest paid the rest of a booking and ${st.excess_minor} (minor units, ${st.currency ?? ""}) was due back, but Stripe already shows at least that amount refunded on the payment with no matching refund. Nothing was refunded again. The guest may still be owed ${st.excess_minor}: please check the payment in Stripe, refund if needed, then press 'Mark refunded by hand'.`
             : refunded
             ? active
               ? "A guest paid the rest of a booking after part of it had already been paid. The difference was refunded automatically."
