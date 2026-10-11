@@ -121,34 +121,41 @@ export async function issuePendingRefunds(db: SqlClient, stripe: StripeApi, book
  * Expires the booker's open "Pay the rest now" Checkouts for this booking, and their open
  * "Update card" Checkouts when no other part-paid booking still needs the card. Sessions are
  * found by listing the booker's Stripe customer's open sessions and matching our metadata
- * (both kinds are always created for that customer), so no session ids need storing.
+ * (both kinds are always created for that customer), so no session ids need storing. Both the
+ * booking's own customer (an anonymous plan's, which serves only this booking) and the person's
+ * are checked.
  */
 export async function expireOpenSessions(db: SqlClient, stripe: StripeApi, bookingId: string): Promise<void> {
-  const r = await db.query<{ customer: string | null; booker: string; other_plans: boolean }>(
-    `select p.stripe_customer_id as customer, b.booker_person_id as booker,
+  const r = await db.query<{ own: string | null; person: string | null; booker: string; other_plans: boolean }>(
+    `select b.stripe_customer_id as own, p.stripe_customer_id as person, b.booker_person_id as booker,
             exists (select 1 from bookings o where o.booker_person_id = b.booker_person_id and o.id <> b.id
                       and o.status = 'deposit_paid') as other_plans
        from bookings b join people p on p.id = b.booker_person_id where b.id = $1`,
     [bookingId],
   );
   const b = r.rows[0];
-  if (!b?.customer) return;
-  let startingAfter: string | undefined;
-  for (;;) {
-    const page = await stripe.checkout.sessions.list({
-      customer: b.customer,
-      status: "open",
-      limit: 100,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
-    for (const s of page.data) {
-      const md = s.metadata ?? {};
-      const payRest = md.kind === "pay_rest" && md.booking_id === bookingId;
-      const updateCard = md.kind === "update_card" && md.person_id === b.booker && !b.other_plans;
-      if (payRest || updateCard) await stripe.checkout.sessions.expire(s.id);
+  if (!b) return;
+  const customers = [...new Set([b.own, b.person].filter((c): c is string => !!c))];
+  for (const customer of customers) {
+    // The booking's own customer only ever serves this booking.
+    const ownOnly = customer === b.own && customer !== b.person;
+    let startingAfter: string | undefined;
+    for (;;) {
+      const page = await stripe.checkout.sessions.list({
+        customer,
+        status: "open",
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      for (const s of page.data) {
+        const md = s.metadata ?? {};
+        const payRest = md.kind === "pay_rest" && md.booking_id === bookingId;
+        const updateCard = md.kind === "update_card" && md.person_id === b.booker && (ownOnly || !b.other_plans);
+        if (payRest || updateCard) await stripe.checkout.sessions.expire(s.id);
+      }
+      if (!page.has_more || page.data.length === 0) break;
+      startingAfter = page.data[page.data.length - 1].id;
     }
-    if (!page.has_more || page.data.length === 0) break;
-    startingAfter = page.data[page.data.length - 1].id;
   }
 }
 

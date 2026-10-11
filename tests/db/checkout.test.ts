@@ -150,12 +150,13 @@ describe("startCheckout", () => {
     expect(s.line_items?.[0].price_data?.unit_amount).toBe(28000 * 2 + 15000);
     expect(s.line_items?.[0].price_data?.currency).toBe("aed");
     expect(s.line_items?.[0].price_data?.product_data?.name).toBe("Test Event — Pay in full");
-    // Pay in full: always a Stripe customer, the guest may tick "save my card" (wallets stay
-    // available: they are card-based); no off-session saving without that choice.
-    expect(s.customer).toBe("cus_test_1");
-    expect(s.customer_email).toBeUndefined();
-    expect(s.saved_payment_method_options).toEqual({ payment_method_save: "enabled", allow_redisplay_filters: ["always", "limited"] });
+    // Pay in full, not signed in: no Stripe customer (nobody's saved cards can show), Checkout
+    // collects the email; no save option.
+    expect(s.customer).toBeUndefined();
+    expect(s.customer_email).toBe("layla@email.com");
+    expect(s.saved_payment_method_options).toBeUndefined();
     expect(s.payment_intent_data?.setup_future_usage).toBeUndefined();
+    expect(stripe.customersCreated).toEqual([]);
     const pending = await db.query<{ id: string; kind: string; checkout_session_id: string; hold_ids: string[] }>(
       "select id, kind, checkout_session_id, hold_ids from pending_bookings",
     );
@@ -190,17 +191,83 @@ describe("startCheckout", () => {
     expect(s.line_items?.[0].price_data?.unit_amount).toBe(48000);
     expect(s.line_items?.[0].price_data?.currency).toBe("eur");
     expect(s.payment_intent_data?.setup_future_usage).toBe("off_session");
+    // Not signed in: a fresh customer for this booking only (no saved cards to show), never
+    // stored on the person; no redisplay.
     expect(s.customer).toBe("cus_test_1");
-    // A plan saves the card automatically (no save checkbox); saved cards are offered to returning guests.
-    expect(s.saved_payment_method_options).toEqual({ allow_redisplay_filters: ["always", "limited"] });
+    expect(stripe.customersCreated).toEqual([
+      expect.objectContaining({ email: "layla@email.com", metadata: expect.objectContaining({ pending_booking_id: expect.any(String) }) }),
+    ]);
+    expect(s.saved_payment_method_options).toBeUndefined();
     expect(s.allowed_payment_method_types).toEqual(["card"]);
-    const p = await db.query<{ stripe_customer_id: string }>(
+    const p = await db.query<{ stripe_customer_id: string | null }>(
       "select stripe_customer_id from people where email = 'layla@email.com'",
     );
-    expect(p.rows[0].stripe_customer_id).toBe("cus_test_1");
+    expect(p.rows[0].stripe_customer_id).toBeNull();
     const payload = (await db.query<{ payload: { schedule: { amountMinor: number }[] } }>("select payload from pending_bookings"))
       .rows[0].payload;
     expect(payload.schedule.map((i) => i.amountMinor)).toEqual([48000, 192000]);
+  });
+
+  describe("saved cards only for the signed-in guest", () => {
+    /** Layla already exists with a Stripe customer (and possibly saved cards). */
+    const known = async () =>
+      (
+        await db.query<{ id: string }>(
+          "insert into people (name, email, stripe_customer_id) values ('Layla Haddad', 'layla@email.com', 'cus_known') returning id",
+        )
+      ).rows[0].id;
+
+    it("anonymous pay in full with someone's email: their customer is NOT attached, no redisplay", async () => {
+      await known();
+      await startCheckout(valid(EVENT, { lines: [{ ticketKey: "whole", qty: 1 }] }), deps(EVENT));
+      const s = stripe.sessions[0];
+      expect(s.customer).toBeUndefined();
+      expect(s.customer_email).toBe("layla@email.com");
+      expect(s.saved_payment_method_options).toBeUndefined();
+    });
+
+    it("anonymous plan with someone's email: a fresh customer, not theirs; no redisplay", async () => {
+      await known();
+      await startCheckout(
+        valid(RETREAT, { lines: [{ ticketKey: "shared", qty: 1 }], paymentOption: "deposit_balance", scheduleConsent: true }),
+        deps(RETREAT),
+      );
+      const s = stripe.sessions[0];
+      expect(s.customer).toBe("cus_test_1");
+      expect(s.customer).not.toBe("cus_known");
+      expect(s.saved_payment_method_options).toBeUndefined();
+      const p = await db.query<{ c: string }>("select stripe_customer_id as c from people where email = 'layla@email.com'");
+      expect(p.rows[0].c).toBe("cus_known");
+    });
+
+    it("signed in as the booker: their customer is attached with save and saved cards", async () => {
+      const id = await known();
+      await startCheckout(valid(EVENT, { lines: [{ ticketKey: "whole", qty: 1 }] }), { ...deps(EVENT), signedInPersonId: id });
+      const s = stripe.sessions[0];
+      expect(s.customer).toBe("cus_known");
+      expect(s.customer_email).toBeUndefined();
+      expect(s.saved_payment_method_options).toEqual({ payment_method_save: "enabled", allow_redisplay_filters: ["always", "limited"] });
+    });
+
+    it("signed in as someone else: treated as anonymous", async () => {
+      await known();
+      const other = (await db.query<{ id: string }>("insert into people (name, email) values ('O', 'o@x.com') returning id")).rows[0].id;
+      await startCheckout(valid(EVENT, { lines: [{ ticketKey: "whole", qty: 1 }] }), { ...deps(EVENT), signedInPersonId: other });
+      expect(stripe.sessions[0].customer).toBeUndefined();
+      expect(stripe.sessions[0].saved_payment_method_options).toBeUndefined();
+    });
+
+    it("signed-in plan: their own customer, saved cards offered", async () => {
+      const id = await known();
+      await startCheckout(
+        valid(RETREAT, { lines: [{ ticketKey: "shared", qty: 1 }], paymentOption: "deposit_balance", scheduleConsent: true }),
+        { ...deps(RETREAT), signedInPersonId: id },
+      );
+      const s = stripe.sessions[0];
+      expect(s.customer).toBe("cus_known");
+      expect(s.saved_payment_method_options).toEqual({ allow_redisplay_filters: ["always", "limited"] });
+      expect(stripe.customersCreated).toEqual([]);
+    });
   });
 
   it("uses setup mode when first payment is zero", async () => {

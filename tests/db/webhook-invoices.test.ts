@@ -82,6 +82,7 @@ describe("chargeScheduledItem", () => {
   it("no Stripe customer: creates one and sends a pay-by-link invoice due on the item's date", async () => {
     const { items } = await planBooking(w);
     await w.db.query("update people set stripe_customer_id = null");
+    await w.db.query("update bookings set stripe_customer_id = null");
     expect(await chargeScheduledItem(w.db, w.stripe, items[1].id, NOW)).toEqual({ status: "invoiced", invoiceId: "in_test_1" });
     expect(w.stripe.customersCreated).toHaveLength(2);
     const params = w.stripe.invoicesCreated[0].params;
@@ -91,6 +92,22 @@ describe("chargeScheduledItem", () => {
     expect(w.stripe.invoiceStatus.in_test_1).toBe("open");
     expect(w.stripe.invoicePaid).toEqual([]);
     expect(await item(items[1].id)).toEqual({ status: "scheduled", stripe_invoice_id: "in_test_1" });
+  });
+
+  it("an anonymous plan's fresh customer is stored on the booking and charged for instalments (never the person's)", async () => {
+    const { bookingId, items } = await planBooking(w);
+    const row = (
+      await w.db.query<{ b: string | null; p: string | null }>(
+        "select b.stripe_customer_id as b, p.stripe_customer_id as p from bookings b join people p on p.id = b.booker_person_id where b.id = $1",
+        [bookingId],
+      )
+    ).rows[0];
+    expect(row).toEqual({ b: "cus_test_1", p: null });
+    // Even if the person later gets a customer of their own (e.g. signed in elsewhere).
+    await w.db.query("update people set stripe_customer_id = 'cus_person'");
+    await chargeScheduledItem(w.db, w.stripe, items[1].id, NOW);
+    expect(w.stripe.invoicesCreated[0].params.customer).toBe("cus_test_1");
+    expect(w.stripe.invoiceItemsCreated[0].customer).toBe("cus_test_1");
   });
 
   it("records the first charge attempt once, from the given clock", async () => {

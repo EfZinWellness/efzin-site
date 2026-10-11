@@ -56,7 +56,8 @@ type Item = {
 export async function chargeScheduledItem(db: SqlClient, stripe: StripeApi, itemId: string, now: Date): Promise<ChargeResult> {
   const r = await db.query<Item>(
     `select i.booking_id, i.seq, i.status, i.amount_minor, i.currency, to_char(i.due_on, 'YYYY-MM-DD') as due_on,
-            i.stripe_invoice_id, b.status as booking_status, b.booker_person_id, p.stripe_customer_id,
+            i.stripe_invoice_id, b.status as booking_status, b.booker_person_id,
+            coalesce(b.stripe_customer_id, p.stripe_customer_id) as stripe_customer_id,
             e.title, e.timezone
        from payment_schedule_items i
        join bookings b on b.id = i.booking_id

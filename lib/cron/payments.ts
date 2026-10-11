@@ -37,7 +37,7 @@ export async function remindUpcomingPayments(ctx: JobContext, stripe: StripeApi 
     `select i.id, i.booking_id, i.amount_minor, i.currency, to_char(i.due_on, 'YYYY-MM-DD') as due_on,
             (select coalesce(sum(o.amount_minor), 0)::int from payment_schedule_items o
               where o.booking_id = i.booking_id and o.status in ('scheduled', 'failed')) as remaining,
-            p.name, p.email, p.stripe_customer_id, e.title
+            p.name, p.email, coalesce(b.stripe_customer_id, p.stripe_customer_id) as stripe_customer_id, e.title
        from payment_schedule_items i
        join bookings b on b.id = i.booking_id
        join people p on p.id = b.booker_person_id

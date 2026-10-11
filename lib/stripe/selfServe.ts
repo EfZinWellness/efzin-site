@@ -34,8 +34,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export async function startPayRest(deps: SelfServeDeps, bookingId: string, personId: string): Promise<{ url: string }> {
   const { db, stripe } = deps;
   if (!UUID_RE.test(bookingId)) throw new SelfServeError("not_found");
-  const b = await db.query<{ status: string; base_currency: string | null; title: string }>(
-    `select b.status, b.base_currency, e.title
+  const b = await db.query<{ status: string; base_currency: string | null; title: string; stripe_customer_id: string | null }>(
+    `select b.status, b.base_currency, e.title, b.stripe_customer_id
        from bookings b join experiences e on e.id = b.experience_id
       where b.id = $1 and b.booker_person_id = $2`,
     [bookingId, personId],
@@ -53,7 +53,8 @@ export async function startPayRest(deps: SelfServeDeps, bookingId: string, perso
   if (total <= 0) throw new SelfServeError("nothing_due");
   const currency = (booking.base_currency ?? items.rows[0].currency).toLowerCase();
 
-  const customer = await ensureStripeCustomer(db, stripe, personId);
+  // The booking's own customer (anonymous plans get one per booking), else the person's.
+  const customer = booking.stripe_customer_id ?? (await ensureStripeCustomer(db, stripe, personId));
   const itemIds = items.rows.map((i) => i.id);
   // The webhook settles exactly these items and refunds anything they no longer account for.
   const metadata = {
@@ -108,8 +109,8 @@ export async function startUpdateCard(
 ): Promise<{ url: string }> {
   const { db, stripe } = deps;
   if (bookingId !== undefined && !UUID_RE.test(bookingId)) throw new SelfServeError("not_found");
-  const b = await db.query<{ id: string; base_currency: string | null }>(
-    `select id, base_currency from bookings
+  const b = await db.query<{ id: string; base_currency: string | null; stripe_customer_id: string | null }>(
+    `select id, base_currency, stripe_customer_id from bookings
       where booker_person_id = $1 and status = 'deposit_paid' and ($2::uuid is null or id = $2::uuid)
       order by created_at desc limit 1`,
     [personId, bookingId ?? null],
@@ -117,7 +118,9 @@ export async function startUpdateCard(
   const booking = b.rows[0];
   if (!booking) throw new SelfServeError("not_found");
 
-  const customer = await ensureStripeCustomer(db, stripe, personId);
+  // The plan's own customer (anonymous plans get one per booking), else the person's; the
+  // webhook makes the new card that customer's default and moves its open invoices to it.
+  const customer = booking.stripe_customer_id ?? (await ensureStripeCustomer(db, stripe, personId));
   const metadata = { kind: "update_card", person_id: personId };
   const back = bookingId ? `${deps.origin}/account/bookings/${bookingId}` : `${deps.origin}/account`;
   const session = await stripe.checkout.sessions.create({

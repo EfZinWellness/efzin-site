@@ -87,6 +87,14 @@ async function completeBooking(s: Stripe.Checkout.Session, pendingId: string | u
   // Every session has the booker's customer, but only a plan (or setup mode) saves the card for
   // later charges; a pay-in-full guest only chose whether to keep it for next time.
   const customer = (await savesCardForPlan(deps.db, s, pendingId)) ? refId(s.customer) : null;
+  // The plan's card lives on this customer (a fresh one for an anonymous booking): later
+  // instalments, pay links, "Pay the rest now" and "Update card" use it.
+  if (customer) {
+    await deps.db.query("update bookings set stripe_customer_id = coalesce(stripe_customer_id, $2) where id = $1", [
+      outcome.bookingId,
+      customer,
+    ]);
+  }
   // Emails first (they never throw): if saving the card fails, the retry finds the booking
   // already confirmed and only redoes the card step.
   return sequence(

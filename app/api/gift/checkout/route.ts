@@ -1,3 +1,4 @@
+import { getCurrentPerson } from "@/lib/auth/session";
 import { withDbClient } from "@/lib/db/client";
 import { sendEmail } from "@/lib/email/send";
 import { handleGiftCheckout } from "@/lib/giftcards/purchase";
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
     origin: await requestOrigin(),
     now: new Date(),
     sendEmail,
+    currentPersonId: async () => (await getCurrentPerson())?.personId ?? null,
   });
   return Response.json(res.body, { status: res.status });
 }

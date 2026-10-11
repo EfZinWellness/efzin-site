@@ -1,4 +1,5 @@
 import { getAuthAdmin } from "@/lib/auth/provision";
+import { getCurrentPerson } from "@/lib/auth/session";
 import { handleCheckout } from "@/lib/booking/checkoutHandler";
 import { loadExperience } from "@/lib/content/load";
 import { withDbClient } from "@/lib/db/client";
@@ -35,6 +36,7 @@ export async function POST(req: Request) {
     now: new Date(),
     sendEmail,
     auth: getAuthAdmin(),
+    currentPersonId: async () => (await getCurrentPerson())?.personId ?? null,
   });
   return Response.json(res.body, { status: res.status });
 }

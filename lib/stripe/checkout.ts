@@ -13,7 +13,7 @@ import {
 import { OPTION_LABELS } from "../booking/quote";
 import type { BookingRequest } from "../booking/validate";
 import type { StripeApi } from "./client";
-import { ensureStripeCustomer } from "./customers";
+import { ensureStripeCustomer, testClockParam } from "./customers";
 
 export interface CheckoutDeps {
   db: SqlClient;
@@ -26,18 +26,43 @@ export interface CheckoutDeps {
   experience: Experience;
   /** Accounts and emails for a booking confirmed here (fully covered by gift/credit). */
   effects?: ConfirmEffects;
+  /**
+   * The signed-in person (from the session cookie), if any. Only when it is the booker are their
+   * Stripe customer and saved cards used; anyone else is treated as anonymous, because the booker
+   * is found by the email typed into the form.
+   */
+  signedInPersonId?: string | null;
 }
 
 /**
- * Which of the customer's saved cards Checkout offers: those saved with the guest's "save my
- * card" tick ('always') and those saved for a payment plan ('limited').
+ * Which of the customer's saved cards Checkout offers (signed-in guests only): those saved with
+ * the guest's "save my card" tick ('always') and those saved for a payment plan ('limited').
  */
 export const SAVED_CARD_FILTERS: Stripe.Checkout.SessionCreateParams.SavedPaymentMethodOptions.AllowRedisplayFilter[] = [
   "always",
   "limited",
 ];
 
-export type CheckoutResult ={ kind: "redirect"; url: string } | { kind: "confirmed"; bookingId: string };
+export type CheckoutResult = { kind: "redirect"; url: string } | { kind: "confirmed"; bookingId: string };
+
+/**
+ * A new Stripe customer for one anonymous payment-plan booking: it holds only the card saved in
+ * this Checkout, so nobody else's saved cards can be offered. Stored on the booking by the
+ * webhook (bookings.stripe_customer_id), never on the person.
+ */
+async function freshPlanCustomer(stripe: StripeApi, pendingId: string, booker: { personId: string; name: string; email: string; phone: string }) {
+  const c = await stripe.customers.create(
+    {
+      name: booker.name,
+      email: booker.email,
+      ...(booker.phone ? { phone: booker.phone } : {}),
+      metadata: { person_id: booker.personId, pending_booking_id: pendingId },
+      ...testClockParam(),
+    },
+    { idempotencyKey: `efzin-plan-customer-${pendingId}` },
+  );
+  return c.id;
+}
 
 /**
  * True only when Stripe definitely did not create the session: a 4xx answer. Network errors,
@@ -74,10 +99,16 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
     if (firstAmount === 0 && laterAmount === 0) {
       return { kind: "confirmed", bookingId: await confirmPendingBooking(db, id, null, deps.effects) };
     }
-    // A plan (or setup mode) saves the card for later charges; pay in full offers the guest a
-    // "save my card" choice. Either way the booker's Stripe customer is attached.
+    // A plan (or setup mode) saves the card for later charges. Signed in as the booker: their own
+    // customer, with saved cards offered (and "save my card" when paying in full). Anonymous: a
+    // plan gets a fresh customer for this booking only; paying in full gets no customer at all.
     const savesCard = payload.option !== "full" || firstAmount === 0;
-    const customer = await ensureStripeCustomer(db, stripe, payload.booker.personId);
+    const signedIn = !!deps.signedInPersonId && deps.signedInPersonId === payload.booker.personId;
+    const customer = signedIn
+      ? await ensureStripeCustomer(db, stripe, payload.booker.personId)
+      : savesCard
+        ? await freshPlanCustomer(stripe, id, payload.booker)
+        : undefined;
     const callAtMs = deps.now.getTime() + (Date.now() - startedMs);
     const expiresAt = new Date(callAtMs + HOLD_MINUTES * 60_000);
     await extendPendingExpiry(db, id, expiresAt);
@@ -114,13 +145,17 @@ export async function startCheckout(req: BookingRequest, deps: CheckoutDeps): Pr
                 },
               },
             ],
-            customer,
-            // Plans save the card off-session automatically (Stripe does not allow the save
-            // checkbox together with setup_future_usage); pay in full offers the checkbox.
-            // Returning guests see their saved cards, including ones saved by a plan ('limited').
-            saved_payment_method_options: savesCard
-              ? { allow_redisplay_filters: SAVED_CARD_FILTERS }
-              : { payment_method_save: "enabled", allow_redisplay_filters: SAVED_CARD_FILTERS },
+            ...(customer ? { customer } : { customer_email: payload.booker.email }),
+            // Signed in only: plans save the card off-session automatically (Stripe does not
+            // allow the save checkbox together with setup_future_usage), pay in full offers the
+            // checkbox, and saved cards (incl. plan cards, 'limited') are offered.
+            ...(signedIn
+              ? {
+                  saved_payment_method_options: savesCard
+                    ? { allow_redisplay_filters: SAVED_CARD_FILTERS }
+                    : { payment_method_save: "enabled" as const, allow_redisplay_filters: SAVED_CARD_FILTERS },
+                }
+              : {}),
             payment_intent_data: {
               metadata,
               ...(savesCard ? { setup_future_usage: "off_session" as const } : {}),

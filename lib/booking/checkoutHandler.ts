@@ -20,6 +20,8 @@ export interface CheckoutHandlerDeps {
   sendEmail: (kind: EmailKind, to: string, data: Record<string, unknown>) => Promise<void>;
   /** Member provisioning for bookings confirmed without Stripe; null/absent skips it. */
   auth?: AuthAdmin | null;
+  /** The signed-in person's id (session cookie), or null; only then are saved cards offered. */
+  currentPersonId?: () => Promise<string | null>;
 }
 
 type Body = CheckoutResult | { error: string; errors?: string[]; message?: string };
@@ -47,8 +49,10 @@ export async function handleCheckout(
 
   try {
     const usdRates = await deps.usdRates();
+    const signedInPersonId = deps.currentPersonId ? await deps.currentPersonId().catch(() => null) : null;
     const result = await deps.withDb((db) =>
       startCheckout(v.value, {
+        signedInPersonId,
         db,
         stripe,
         now: deps.now,

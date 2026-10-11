@@ -106,11 +106,11 @@ describe("startGiftCheckout", () => {
     expect(s.mode).toBe("payment");
     expect(s.adaptive_pricing).toEqual({ enabled: true });
     expect(s.allowed_payment_method_types).toEqual(["card"]);
-    // The buyer's Stripe customer is attached so they can save their card (wallets included).
-    expect(s.customer).toBe("cus_test_1");
-    expect(s.customer_email).toBeUndefined();
-    expect(stripe.customersCreated).toEqual([expect.objectContaining({ email: "layla@example.com" })]);
-    expect(s.saved_payment_method_options).toEqual({ payment_method_save: "enabled", allow_redisplay_filters: ["always", "limited"] });
+    // Not signed in: no customer (nobody's saved cards), Checkout collects the email; no save option.
+    expect(s.customer).toBeUndefined();
+    expect(s.customer_email).toBe("layla@example.com");
+    expect(stripe.customersCreated).toEqual([]);
+    expect(s.saved_payment_method_options).toBeUndefined();
     expect(s.payment_intent_data).toEqual({ metadata: s.metadata });
     expect(s.line_items).toEqual([
       expect.objectContaining({
@@ -124,6 +124,25 @@ describe("startGiftCheckout", () => {
     const batches = await q<{ id: string; quantity: number }>("select id, quantity from gift_card_batches");
     expect(batches).toEqual([{ id: s.metadata!.batch_id, quantity: 1 }]);
     expect(sent).toEqual([]);
+  });
+
+  it("anonymous buyer using an existing guest's email: their customer is not attached, no redisplay", async () => {
+    await db.query("insert into people (name, email, stripe_customer_id) values ('Layla', 'layla@example.com', 'cus_known')");
+    await startGiftCheckout(purchase(), deps());
+    const s = stripe.sessions[0];
+    expect(s.customer).toBeUndefined();
+    expect(s.saved_payment_method_options).toBeUndefined();
+  });
+
+  it("signed-in buyer: their own customer with save and saved cards", async () => {
+    const id = (
+      await db.query<{ id: string }>("insert into people (name, email, stripe_customer_id) values ('Layla', 'layla@example.com', 'cus_known') returning id")
+    ).rows[0].id;
+    await startGiftCheckout(purchase(), { ...deps(), signedInPersonId: id });
+    const s = stripe.sessions[0];
+    expect(s.customer).toBe("cus_known");
+    expect(s.customer_email).toBeUndefined();
+    expect(s.saved_payment_method_options).toEqual({ payment_method_save: "enabled", allow_redisplay_filters: ["always", "limited"] });
   });
 
   it("issues quantity cards in one batch with one line item of that quantity", async () => {

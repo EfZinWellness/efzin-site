@@ -104,6 +104,8 @@ export interface GiftCheckoutDeps {
   /** Site origin for return URLs. */
   origin: string;
   now: Date;
+  /** The signed-in person (session cookie); saved cards only when it is the buyer. */
+  signedInPersonId?: string | null;
 }
 
 /**
@@ -116,9 +118,11 @@ export interface GiftCheckoutDeps {
 export async function startGiftCheckout(input: GiftPurchase, deps: GiftCheckoutDeps): Promise<{ url: string }> {
   const { db, stripe } = deps;
   const buyerPersonId = await upsertPersonByEmail(db, { name: input.buyerName, email: input.buyerEmail });
-  // The buyer's Stripe customer, so Checkout can offer to save the card (and show saved ones).
-  // Made before any card is issued: a failure here leaves nothing behind.
-  const customer = await ensureStripeCustomer(db, stripe, buyerPersonId);
+  // Signed in as the buyer: their Stripe customer, so Checkout offers to save the card and shows
+  // saved ones. Anyone else (the buyer is found by the typed email): no customer, so nobody's
+  // saved cards can be used. Made before any card is issued: a failure leaves nothing behind.
+  const signedIn = !!deps.signedInPersonId && deps.signedInPersonId === buyerPersonId;
+  const customer = signedIn ? await ensureStripeCustomer(db, stripe, buyerPersonId) : null;
   const suggested = input.suggestedSlug
     ? (await db.query<{ id: string }>("select id from experiences where slug = $1", [input.suggestedSlug])).rows[0]
     : undefined;
@@ -166,8 +170,12 @@ export async function startGiftCheckout(input: GiftPurchase, deps: GiftCheckoutD
         // that settle days later.
         allowed_payment_method_types: ["card"],
         adaptive_pricing: { enabled: true },
-        customer,
-        saved_payment_method_options: { payment_method_save: "enabled", allow_redisplay_filters: SAVED_CARD_FILTERS },
+        ...(customer
+          ? {
+              customer,
+              saved_payment_method_options: { payment_method_save: "enabled" as const, allow_redisplay_filters: SAVED_CARD_FILTERS },
+            }
+          : { customer_email: input.buyerEmail }),
         client_reference_id: batchId,
         allow_promotion_codes: false,
         line_items: [
@@ -210,6 +218,8 @@ export interface GiftHandlerDeps {
   origin: string;
   now: Date;
   sendEmail: (kind: EmailKind, to: string, data: Record<string, unknown>) => Promise<void>;
+  /** The signed-in person's id (session cookie), or null. */
+  currentPersonId?: () => Promise<string | null>;
 }
 
 type GiftBody = { url: string } | { error: string; errors?: string[]; message?: string };
@@ -228,7 +238,10 @@ export async function handleGiftCheckout(
   const stripe = deps.stripe;
   if (!stripe) return { status: 503, body: UNAVAILABLE };
   try {
-    const out = await deps.withDb((db) => startGiftCheckout(parsed.data, { db, stripe, origin: deps.origin, now: deps.now }));
+    const signedInPersonId = deps.currentPersonId ? await deps.currentPersonId().catch(() => null) : null;
+    const out = await deps.withDb((db) =>
+      startGiftCheckout(parsed.data, { db, stripe, origin: deps.origin, now: deps.now, signedInPersonId }),
+    );
     return out === null ? { status: 503, body: UNAVAILABLE } : { status: 200, body: out };
   } catch (err) {
     console.error("gift checkout failed", err);
